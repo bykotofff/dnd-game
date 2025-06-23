@@ -30,6 +30,7 @@ $$;
 GRANT ALL PRIVILEGES ON DATABASE dnd_game TO dnd_user;
 GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO dnd_user;
 GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO dnd_user;
+GRANT ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA public TO dnd_user;
 
 -- Настройки для оптимизации производительности
 ALTER SYSTEM SET shared_preload_libraries = 'pg_stat_statements';
@@ -80,55 +81,33 @@ CREATE INDEX IF NOT EXISTS idx_game_events_timestamp ON logs.game_events(timesta
 CREATE INDEX IF NOT EXISTS idx_game_events_game_id ON logs.game_events(game_id);
 CREATE INDEX IF NOT EXISTS idx_game_events_user_id ON logs.game_events(user_id);
 
--- Предустановленные данные
--- Создание админского пользователя (пароль: admin123)
-INSERT INTO users (id, username, email, hashed_password, display_name, is_active, is_verified, is_admin)
-VALUES (
-           uuid_generate_v4(),
-           'admin',
-           'admin@dndgame.local',
-           '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LwlKs6I8Q5dZ7rN.O',  -- admin123
-           'Game Administrator',
-           true,
-           true,
-           true
-       ) ON CONFLICT (username) DO NOTHING;
-
--- Создание тестового пользователя (пароль: test123)
-INSERT INTO users (id, username, email, hashed_password, display_name, is_active, is_verified, is_admin)
-VALUES (
-           uuid_generate_v4(),
-           'testuser',
-           'test@dndgame.local',
-           '$2b$12$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi',  -- test123
-           'Test User',
-           true,
-           true,
-           false
-       ) ON CONFLICT (username) DO NOTHING;
-
 -- Функция для очистки старых логов
 CREATE OR REPLACE FUNCTION cleanup_old_logs()
-RETURNS INTEGER AS $$
+RETURNS INTEGER AS $
 DECLARE
-deleted_count INTEGER;
+deleted_count INTEGER := 0;
+    temp_count INTEGER;
 BEGIN
     -- Удаляем логи старше 30 дней
 DELETE FROM logs.api_requests
 WHERE timestamp < CURRENT_TIMESTAMP - INTERVAL '30 days';
 
-GET DIAGNOSTICS deleted_count = ROW_COUNT;
+GET DIAGNOSTICS temp_count = ROW_COUNT;
+deleted_count := deleted_count + temp_count;
 
 DELETE FROM logs.game_events
 WHERE timestamp < CURRENT_TIMESTAMP - INTERVAL '30 days';
 
-GET DIAGNOSTICS deleted_count = deleted_count + ROW_COUNT;
+GET DIAGNOSTICS temp_count = ROW_COUNT;
+deleted_count := deleted_count + temp_count;
 
 RETURN deleted_count;
 END;
-$$ LANGUAGE plpgsql;
+$ LANGUAGE plpgsql;
 
--- Создание задания для автоматической очистки логов (требует pg_cron)
--- SELECT cron.schedule('cleanup-logs', '0 2 * * *', 'SELECT cleanup_old_logs();');
+-- Предоставляем права пользователю на схему logs
+GRANT ALL PRIVILEGES ON SCHEMA logs TO dnd_user;
+GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA logs TO dnd_user;
+GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA logs TO dnd_user;
 
 COMMIT;

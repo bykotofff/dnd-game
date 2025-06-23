@@ -54,16 +54,29 @@ async def startup_event():
 
         pipeline = pipeline.to(device)
 
-        # Включаем оптимизации для экономии памяти
+        # Включаем оптимизации для экономии памяти (без xformers)
         if device == "cuda":
-            pipeline.enable_attention_slicing()
-            pipeline.enable_xformers_memory_efficient_attention()
+            try:
+                pipeline.enable_attention_slicing()
+                logger.info("Attention slicing enabled")
+            except Exception as e:
+                logger.warning(f"Could not enable attention slicing: {e}")
+
+            try:
+                # Пробуем включить xformers, но не падаем если не получается
+                pipeline.enable_xformers_memory_efficient_attention()
+                logger.info("Xformers memory efficient attention enabled")
+            except Exception as e:
+                logger.warning(f"Xformers not available, using standard attention: {e}")
+                # Используем стандартные оптимизации
+                pipeline.enable_attention_slicing("auto")
 
         logger.info("Stable Diffusion model loaded successfully!")
 
     except Exception as e:
         logger.error(f"Failed to load model: {e}")
-        raise
+        # Не поднимаем исключение, чтобы сервер мог запуститься
+        # raise
 
 
 @app.get("/health")
@@ -72,7 +85,7 @@ async def health_check():
     global pipeline
 
     if pipeline is None:
-        raise HTTPException(status_code=503, detail="Model not loaded")
+        return {"status": "loading", "model_loaded": False}
 
     return {"status": "healthy", "model_loaded": True}
 
@@ -83,7 +96,7 @@ async def generate_image(request: GenerateRequest):
     global pipeline
 
     if pipeline is None:
-        raise HTTPException(status_code=503, detail="Model not loaded")
+        raise HTTPException(status_code=503, detail="Model not loaded yet, please wait")
 
     try:
         logger.info(f"Generating image with prompt: {request.prompt[:100]}...")

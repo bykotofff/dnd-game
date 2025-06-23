@@ -1,4 +1,4 @@
-import aioredis
+import redis.asyncio as aioredis
 import json
 import logging
 from typing import Any, Optional, Dict, List
@@ -41,7 +41,7 @@ class RedisClient:
     async def disconnect(self):
         """Отключение от Redis"""
         if self.redis:
-            await self.redis.close()
+            await self.redis.aclose()
             logger.info("Disconnected from Redis")
 
     async def health_check(self) -> bool:
