@@ -1,0 +1,42 @@
+# FastAPI и веб-сервер
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+websockets==12.0
+
+# База данных
+sqlalchemy==2.0.23
+asyncpg==0.29.0
+alembic==1.12.1
+
+# Redis
+redis==5.0.1
+aioredis==2.0.1
+
+# Аутентификация и безопасность
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+python-multipart==0.0.6
+
+# Validation и сериализация
+pydantic==2.5.0
+pydantic-settings==2.0.3
+
+# HTTP клиенты и интеграции
+httpx==0.25.2
+aiofiles==23.2.1
+
+# Логирование и мониторинг
+structlog==23.2.0
+python-json-logger==2.0.7
+
+# Утилиты
+python-dotenv==1.0.0
+cryptography==41.0.8
+Pillow==10.1.0
+
+# Для разработки
+pytest==7.4.3
+pytest-asyncio==0.21.1
+black==23.11.0
+isort==5.12.0
+flake8==6.1.0
