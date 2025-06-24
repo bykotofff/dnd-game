@@ -1,0 +1,350 @@
+@import 'tailwindcss/base';
+@import 'tailwindcss/components';
+@import 'tailwindcss/utilities';
+@import './variables.css';
+
+/* Base styles */
+* {
+    box-sizing: border-box;
+}
+
+html {
+    scroll-behavior: smooth;
+}
+
+body {
+    margin: 0;
+    font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+    color: #f1f5f9;
+    min-height: 100vh;
+    overflow-x: hidden;
+}
+
+#root {
+    min-height: 100vh;
+}
+
+/* Scrollbar Styling */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: #1e293b;
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #475569;
+    border-radius: 4px;
+    transition: background 0.2s ease;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #64748b;
+}
+
+/* Firefox scrollbar */
+* {
+    scrollbar-width: thin;
+    scrollbar-color: #475569 #1e293b;
+}
+
+/* Focus styles */
+*:focus {
+    outline: 2px solid #3b82f6;
+    outline-offset: 2px;
+}
+
+/* Button focus styles */
+button:focus,
+button:focus-visible {
+    outline: 2px solid #3b82f6;
+    outline-offset: 2px;
+}
+
+/* Selection styles */
+::selection {
+    background: #3b82f6;
+    color: white;
+}
+
+/* Typography */
+.font-fantasy {
+    font-family: 'Cinzel', serif;
+}
+
+.font-medieval {
+    font-family: 'Uncial Antiqua', cursive;
+}
+
+/* Custom Components */
+
+/* Game Panel */
+.game-panel {
+    @apply bg-secondary-800/90 backdrop-blur-sm border border-secondary-700 rounded-lg shadow-game-panel;
+}
+
+/* Character Card */
+.character-card {
+    @apply bg-gradient-to-br from-secondary-800 to-secondary-900 border border-secondary-700 rounded-xl shadow-character-card hover:shadow-xl transition-all duration-300;
+}
+
+.character-card:hover {
+    @apply border-primary-500/50 shadow-primary-500/20;
+}
+
+/* Dice Button */
+.dice-button {
+    @apply relative overflow-hidden rounded-lg border-2 border-transparent bg-gradient-to-br shadow-dice transition-all duration-300 hover:scale-105 active:scale-95;
+}
+
+.dice-button::before {
+    content: '';
+    @apply absolute inset-0 bg-gradient-to-br from-white/20 to-transparent opacity-0 transition-opacity duration-300;
+}
+
+.dice-button:hover::before {
+    @apply opacity-100;
+}
+
+/* Dice specific colors */
+.dice-d4 {
+    @apply from-dice-d4 to-red-600 text-white;
+}
+
+.dice-d6 {
+    @apply from-dice-d6 to-teal-600 text-white;
+}
+
+.dice-d8 {
+    @apply from-dice-d8 to-blue-600 text-white;
+}
+
+.dice-d10 {
+    @apply from-dice-d10 to-green-600 text-white;
+}
+
+.dice-d12 {
+    @apply from-dice-d12 to-yellow-600 text-gray-900;
+}
+
+.dice-d20 {
+    @apply from-dice-d20 to-purple-600 text-white;
+}
+
+.dice-d100 {
+    @apply from-dice-d100 to-teal-700 text-white;
+}
+
+/* Chat Message */
+.chat-message {
+    @apply rounded-lg p-3 mb-2 border-l-4 transition-all duration-200;
+}
+
+.chat-message.player {
+    @apply bg-secondary-800/50 border-l-blue-500;
+}
+
+.chat-message.dm {
+    @apply bg-primary-900/30 border-l-primary-500;
+}
+
+.chat-message.system {
+    @apply bg-accent-900/20 border-l-accent-500;
+}
+
+.chat-message.dice {
+    @apply bg-green-900/20 border-l-green-500;
+}
+
+.chat-message.ooc {
+    @apply bg-secondary-700/30 border-l-secondary-400 italic;
+}
+
+/* HP Bar */
+.hp-bar {
+    @apply relative h-6 bg-secondary-700 rounded-full overflow-hidden;
+}
+
+.hp-bar::before {
+    content: '';
+    @apply absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent;
+    animation: shimmer 2s ease-in-out infinite;
+}
+
+.hp-fill {
+    @apply h-full bg-gradient-to-r from-red-500 to-red-600 transition-all duration-500 ease-out;
+}
+
+/* Stat Block */
+.stat-block {
+    @apply bg-secondary-800 rounded-lg p-4 border border-secondary-700;
+}
+
+.stat-value {
+    @apply text-2xl font-bold text-primary-400;
+}
+
+.stat-modifier {
+    @apply text-sm text-secondary-400;
+}
+
+/* Modal */
+.modal-overlay {
+    @apply fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4;
+}
+
+.modal-content {
+    @apply bg-secondary-800 rounded-xl shadow-2xl border border-secondary-700 max-w-lg w-full max-h-[90vh] overflow-y-auto;
+}
+
+/* Form Styles */
+.form-input {
+    @apply w-full px-4 py-3 bg-secondary-700 border border-secondary-600 rounded-lg text-white placeholder-secondary-400 focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 transition-all duration-200;
+}
+
+.form-label {
+    @apply block text-sm font-medium text-secondary-300 mb-2;
+}
+
+.form-error {
+    @apply text-red-400 text-sm mt-1;
+}
+
+/* Button Variants */
+.btn {
+    @apply px-4 py-2 rounded-lg font-medium transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-secondary-900;
+}
+
+.btn-primary {
+    @apply bg-primary-600 hover:bg-primary-700 text-white focus:ring-primary-500;
+}
+
+.btn-secondary {
+    @apply bg-secondary-600 hover:bg-secondary-700 text-white focus:ring-secondary-500;
+}
+
+.btn-success {
+    @apply bg-green-600 hover:bg-green-700 text-white focus:ring-green-500;
+}
+
+.btn-warning {
+    @apply bg-yellow-600 hover:bg-yellow-700 text-white focus:ring-yellow-500;
+}
+
+.btn-danger {
+    @apply bg-red-600 hover:bg-red-700 text-white focus:ring-red-500;
+}
+
+.btn-ghost {
+    @apply bg-transparent hover:bg-secondary-700 text-secondary-300 hover:text-white border border-secondary-600 hover:border-secondary-500 focus:ring-secondary-500;
+}
+
+/* Loading Spinner */
+.spinner {
+    @apply inline-block w-6 h-6 border-2 border-current border-r-transparent rounded-full;
+    animation: spin 1s linear infinite;
+}
+
+/* Custom Animations */
+@keyframes shimmer {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(100%); }
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+@keyframes fadeInUp {
+    from {
+        opacity: 0;
+        transform: translateY(30px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes slideInRight {
+    from {
+        opacity: 0;
+        transform: translateX(100%);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+@keyframes pulse {
+    0%, 100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: .5;
+    }
+}
+
+/* Utility Classes */
+.text-shadow {
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+}
+
+.text-glow {
+    text-shadow: 0 0 10px currentColor;
+}
+
+.bg-glass {
+    background: rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.border-gradient {
+    border: 1px solid;
+    border-image: linear-gradient(45deg, #ef4444, #f59e0b) 1;
+}
+
+/* Responsive Design Helpers */
+.container-fluid {
+    @apply w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8;
+}
+
+/* Print Styles */
+@media print {
+    .no-print {
+        display: none !important;
+    }
+
+    body {
+        background: white !important;
+        color: black !important;
+    }
+}
+
+/* High Contrast Mode */
+@media (prefers-contrast: high) {
+    .character-card,
+    .game-panel {
+        border-width: 2px;
+    }
+}
+
+/* Reduced Motion */
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
+}
