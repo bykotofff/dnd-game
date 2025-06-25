@@ -10,7 +10,7 @@ import RegisterPage from '@/pages/auth/RegisterPage';
 import DashboardPage from '@/pages/dashboard/DashboardPage';
 import CharactersPage from '@/pages/characters/CharactersPage';
 import CharacterCreatePage from '@/pages/characters/CharacterCreatePage';
-import CharacterEditPage from '@/pages/characters/CharacterEditPage';
+import CharacterViewPage from '@/pages/characters/CharacterViewPage';
 import CampaignsPage from '@/pages/campaigns/CampaignsPage';
 import GamePage from '@/pages/game/GamePage';
 import ProfilePage from '@/pages/profile/ProfilePage';
@@ -77,6 +77,7 @@ function App() {
                             {/* Characters */}
                             <Route path="characters" element={<CharactersPage />} />
                             <Route path="characters/create" element={<CharacterCreatePage />} />
+                            <Route path="characters/:id" element={<CharacterViewPage />} />
                             <Route path="characters/:id/edit" element={<CharacterEditPage />} />
 
                             {/* Campaigns */}
