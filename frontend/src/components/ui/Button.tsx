@@ -1,315 +1,92 @@
-import { create } from 'zustand';
-import { subscribeWithSelector } from 'zustand/middleware';
-import { websocketService } from '@/services/websocketService';
-import type { Game, GameMessage, Character, DiceRollData } from '@/types';
+import React from 'react';
+import { Slot } from '@radix-ui/react-slot';
+import { cva, type VariantProps } from 'class-variance-authority';
+import { cn } from '@/utils';
 
-interface GameState {
-    // Current game state
-    currentGame: Game | null;
-    isConnected: boolean;
-    isConnecting: boolean;
-    connectionError: string | null;
-
-    // Game data
-    messages: GameMessage[];
-    playersOnline: string[];
-    activeCharacters: Character[];
-    currentScene: string | null;
-
-    // UI state
-    chatInput: string;
-    isTyping: boolean;
-    showCharacterSheets: boolean;
-    showDiceRoller: boolean;
-    selectedCharacterId: string | null;
-
-    // Actions
-    connectToGame: (gameId: string) => Promise<void>;
-    disconnectFromGame: () => Promise<void>;
-    sendMessage: (content: string, isOOC?: boolean) => void;
-    sendAction: (action: string) => void;
-    rollDice: (notation: string, purpose?: string, advantage?: boolean, disadvantage?: boolean) => void;
-    addMessage: (message: GameMessage) => void;
-    updatePlayersOnline: (players: string[]) => void;
-    setCurrentGame: (game: Game) => void;
-    setChatInput: (input: string) => void;
-    setTyping: (typing: boolean) => void;
-    toggleCharacterSheets: () => void;
-    toggleDiceRoller: () => void;
-    selectCharacter: (characterId: string | null) => void;
-    updateCharacter: (characterId: string, updates: Partial<Character>) => void;
-    clearGameState: () => void;
-}
-
-export const useGameStore = create<GameState>()(
-    subscribeWithSelector((set, get) => ({
-        // Initial state
-        currentGame: null,
-        isConnected: false,
-        isConnecting: false,
-        connectionError: null,
-        messages: [],
-        playersOnline: [],
-        activeCharacters: [],
-        currentScene: null,
-        chatInput: '',
-        isTyping: false,
-        showCharacterSheets: false,
-        showDiceRoller: false,
-        selectedCharacterId: null,
-
-        // Connect to game
-        connectToGame: async (gameId: string) => {
-            set({ isConnecting: true, connectionError: null });
-
-            try {
-                await websocketService.connect(gameId);
-
-                // Setup WebSocket event listeners
-                websocketService.on('connected', (data) => {
-                    set({
-                        isConnected: true,
-                        isConnecting: false,
-                        connectionError: null,
-                        playersOnline: data.players_online || [],
-                    });
-                });
-
-                websocketService.on('player_joined', (data) => {
-                    const { playersOnline } = get();
-                    set({
-                        playersOnline: data.players_online || playersOnline,
-                    });
-                });
-
-                websocketService.on('player_left', (data) => {
-                    const { playersOnline } = get();
-                    set({
-                        playersOnline: data.players_online || playersOnline,
-                    });
-                });
-
-                websocketService.on('chat_message', (data) => {
-                    get().addMessage(data);
-                });
-
-                websocketService.on('player_action', (data) => {
-                    get().addMessage(data);
-                });
-
-                websocketService.on('dice_roll', (data) => {
-                    get().addMessage(data);
-                });
-
-                websocketService.on('dm_response', (data) => {
-                    get().addMessage(data);
-                });
-
-                websocketService.on('message_history', (data) => {
-                    set({ messages: data.messages || [] });
-                });
-
-                websocketService.on('character_updated', (data) => {
-                    const { updateCharacter } = get();
-                    updateCharacter(data.character_id, data.updates);
-                });
-
-                websocketService.on('roll_prompt', (data) => {
-                    // Handle dice roll prompt from DM
-                    console.log('Roll prompt:', data);
-                    set({ showDiceRoller: true });
-                });
-
-                websocketService.on('players_list', (data) => {
-                    set({ playersOnline: data.players || [] });
-                });
-
-                websocketService.on('error', (data) => {
-                    console.error('Game WebSocket error:', data);
-                    set({
-                        connectionError: data.message || 'Ошибка соединения',
-                        isConnected: false,
-                        isConnecting: false,
-                    });
-                });
-
-            } catch (error: any) {
-                console.error('Failed to connect to game:', error);
-                set({
-                    isConnecting: false,
-                    connectionError: error.message || 'Не удалось подключиться к игре',
-                    isConnected: false,
-                });
-                throw error;
-            }
+const buttonVariants = cva(
+    "inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50",
+    {
+        variants: {
+            variant: {
+                default:
+                    "bg-primary-600 text-white shadow hover:bg-primary-700 focus:ring-primary-500",
+                destructive:
+                    "bg-red-600 text-white shadow-sm hover:bg-red-700 focus:ring-red-500",
+                outline:
+                    "border border-gray-300 bg-transparent shadow-sm hover:bg-gray-50 hover:text-gray-900 dark:border-gray-600 dark:hover:bg-gray-800 dark:hover:text-gray-100",
+                secondary:
+                    "bg-gray-100 text-gray-900 shadow-sm hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700",
+                ghost:
+                    "hover:bg-gray-100 hover:text-gray-900 dark:hover:bg-gray-800 dark:hover:text-gray-100",
+                link:
+                    "text-primary-600 underline-offset-4 hover:underline dark:text-primary-400",
+                fantasy:
+                    "bg-gradient-to-r from-amber-600 to-yellow-600 text-white shadow-lg hover:from-amber-700 hover:to-yellow-700 focus:ring-amber-500 border border-amber-700",
+            },
+            size: {
+                default: "h-9 px-4 py-2",
+                sm: "h-8 rounded-md px-3 text-xs",
+                lg: "h-10 rounded-md px-8",
+                icon: "h-9 w-9",
+            },
         },
-
-        // Disconnect from game
-        disconnectFromGame: async () => {
-            try {
-                await websocketService.disconnect();
-            } finally {
-                set({
-                    isConnected: false,
-                    isConnecting: false,
-                    connectionError: null,
-                });
-            }
+        defaultVariants: {
+            variant: "default",
+            size: "default",
         },
-
-        // Send chat message
-        sendMessage: (content: string, isOOC: boolean = false) => {
-            const { selectedCharacterId } = get();
-            websocketService.sendChatMessage(content, isOOC, selectedCharacterId || undefined);
-            set({ chatInput: '' });
-        },
-
-        // Send player action
-        sendAction: (action: string) => {
-            const { selectedCharacterId } = get();
-            websocketService.sendPlayerAction(action, selectedCharacterId || undefined);
-        },
-
-        // Roll dice
-        rollDice: (
-            notation: string,
-            purpose?: string,
-            advantage?: boolean,
-            disadvantage?: boolean
-        ) => {
-            const { selectedCharacterId } = get();
-            websocketService.sendDiceRoll(
-                notation,
-                purpose,
-                selectedCharacterId || undefined,
-                advantage,
-                disadvantage
-            );
-        },
-
-        // Add message to chat
-        addMessage: (message: GameMessage) => {
-            set((state) => ({
-                messages: [...state.messages, message].slice(-100), // Keep last 100 messages
-            }));
-        },
-
-        // Update online players
-        updatePlayersOnline: (players: string[]) => {
-            set({ playersOnline: players });
-        },
-
-        // Set current game
-        setCurrentGame: (game: Game) => {
-            set({
-                currentGame: game,
-                currentScene: game.current_scene,
-            });
-        },
-
-        // Set chat input
-        setChatInput: (input: string) => {
-            set({ chatInput: input });
-        },
-
-        // Set typing status
-        setTyping: (typing: boolean) => {
-            set({ isTyping: typing });
-        },
-
-        // Toggle character sheets panel
-        toggleCharacterSheets: () => {
-            set((state) => ({
-                showCharacterSheets: !state.showCharacterSheets,
-            }));
-        },
-
-        // Toggle dice roller panel
-        toggleDiceRoller: () => {
-            set((state) => ({
-                showDiceRoller: !state.showDiceRoller,
-            }));
-        },
-
-        // Select character
-        selectCharacter: (characterId: string | null) => {
-            set({ selectedCharacterId: characterId });
-        },
-
-        // Update character
-        updateCharacter: (characterId: string, updates: Partial<Character>) => {
-            set((state) => ({
-                activeCharacters: state.activeCharacters.map((char) =>
-                    char.id === characterId ? { ...char, ...updates } : char
-                ),
-            }));
-        },
-
-        // Clear game state
-        clearGameState: () => {
-            set({
-                currentGame: null,
-                isConnected: false,
-                isConnecting: false,
-                connectionError: null,
-                messages: [],
-                playersOnline: [],
-                activeCharacters: [],
-                currentScene: null,
-                chatInput: '',
-                isTyping: false,
-                showCharacterSheets: false,
-                showDiceRoller: false,
-                selectedCharacterId: null,
-            });
-        },
-    }))
+    }
 );
 
-// Selector hooks
-export const useGameConnection = () => {
-    const store = useGameStore();
-    return {
-        isConnected: store.isConnected,
-        isConnecting: store.isConnecting,
-        connectionError: store.connectionError,
-        currentGame: store.currentGame,
-    };
-};
+export interface ButtonProps
+    extends React.ButtonHTMLAttributes<HTMLButtonElement>,
+        VariantProps<typeof buttonVariants> {
+    asChild?: boolean;
+    loading?: boolean;
+}
 
-export const useGameChat = () => {
-    const store = useGameStore();
-    return {
-        messages: store.messages,
-        chatInput: store.chatInput,
-        isTyping: store.isTyping,
-        sendMessage: store.sendMessage,
-        sendAction: store.sendAction,
-        setChatInput: store.setChatInput,
-        setTyping: store.setTyping,
-    };
-};
+const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
+    ({ className, variant, size, asChild = false, loading = false, disabled, children, ...props }, ref) => {
+        const Comp = asChild ? Slot : "button";
 
-export const useGameActions = () => {
-    const store = useGameStore();
-    return {
-        connectToGame: store.connectToGame,
-        disconnectFromGame: store.disconnectFromGame,
-        rollDice: store.rollDice,
-        selectCharacter: store.selectCharacter,
-        updateCharacter: store.updateCharacter,
-    };
-};
+        return (
+            <Comp
+                className={cn(buttonVariants({ variant, size, className }))}
+                ref={ref}
+                disabled={disabled || loading}
+                {...props}
+            >
+                {loading ? (
+                    <>
+                        <svg
+                            className="animate-spin -ml-1 mr-2 h-4 w-4"
+                            xmlns="http://www.w3.org/2000/svg"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                        >
+                            <circle
+                                className="opacity-25"
+                                cx="12"
+                                cy="12"
+                                r="10"
+                                stroke="currentColor"
+                                strokeWidth="4"
+                            />
+                            <path
+                                className="opacity-75"
+                                fill="currentColor"
+                                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                            />
+                        </svg>
+                        Loading...
+                    </>
+                ) : (
+                    children
+                )}
+            </Comp>
+        );
+    }
+);
 
-export const useGameUI = () => {
-    const store = useGameStore();
-    return {
-        showCharacterSheets: store.showCharacterSheets,
-        showDiceRoller: store.showDiceRoller,
-        selectedCharacterId: store.selectedCharacterId,
-        playersOnline: store.playersOnline,
-        currentScene: store.currentScene,
-        toggleCharacterSheets: store.toggleCharacterSheets,
-        toggleDiceRoller: store.toggleDiceRoller,
-    };
-};
+Button.displayName = "Button";
+
+export { Button, buttonVariants };

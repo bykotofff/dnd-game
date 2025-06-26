@@ -34,32 +34,32 @@ const RACES = [
 ];
 
 const CLASSES = [
-    { id: 'fighter', name: 'Воин', description: 'Мастер оружия и доспехов', hitDie: 10 },
+    { id: 'fighter', name: 'Воин', description: 'Мастер боя и тактики', hitDie: 10 },
     { id: 'wizard', name: 'Волшебник', description: 'Изучает тайны магии', hitDie: 6 },
-    { id: 'rogue', name: 'Плут', description: 'Скрытность и ловкость', hitDie: 8 },
-    { id: 'cleric', name: 'Жрец', description: 'Служитель божества', hitDie: 8 },
-    { id: 'ranger', name: 'Следопыт', description: 'Охотник и защитник природы', hitDie: 10 },
+    { id: 'rogue', name: 'Плут', description: 'Хитрый и ловкий', hitDie: 8 },
+    { id: 'cleric', name: 'Клерик', description: 'Служитель божества', hitDie: 8 },
+    { id: 'ranger', name: 'Следопыт', description: 'Охотник и следопыт', hitDie: 10 },
     { id: 'paladin', name: 'Паладин', description: 'Святой воин', hitDie: 10 },
-    { id: 'barbarian', name: 'Варвар', description: 'Дикий берсерк', hitDie: 12 },
-    { id: 'bard', name: 'Бард', description: 'Мастер песен и магии', hitDie: 8 },
-    { id: 'druid', name: 'Друид', description: 'Хранитель природы', hitDie: 8 },
+    { id: 'barbarian', name: 'Варвар', description: 'Дикий воин', hitDie: 12 },
+    { id: 'bard', name: 'Бард', description: 'Мастер слова и магии', hitDie: 8 },
+    { id: 'druid', name: 'Друид', description: 'Защитник природы', hitDie: 8 },
     { id: 'monk', name: 'Монах', description: 'Мастер боевых искусств', hitDie: 8 },
     { id: 'sorcerer', name: 'Чародей', description: 'Врожденная магия', hitDie: 6 },
-    { id: 'warlock', name: 'Колдун', description: 'Заключивший договор', hitDie: 8 },
+    { id: 'warlock', name: 'Колдун', description: 'Служитель покровителя', hitDie: 8 },
 ];
 
 const BACKGROUNDS = [
-    { id: 'acolyte', name: 'Послушник', description: 'Служили в храме' },
-    { id: 'criminal', name: 'Преступник', description: 'Жили вне закона' },
-    { id: 'folk-hero', name: 'Народный герой', description: 'Защищали простых людей' },
-    { id: 'noble', name: 'Благородный', description: 'Родились в знатной семье' },
-    { id: 'sage', name: 'Мудрец', description: 'Посвятили жизнь знаниям' },
-    { id: 'soldier', name: 'Солдат', description: 'Служили в армии' },
+    { id: 'acolyte', name: 'Послушник', description: 'Служитель храма' },
+    { id: 'criminal', name: 'Преступник', description: 'Нарушитель закона' },
+    { id: 'folk-hero', name: 'Народный герой', description: 'Защитник простых людей' },
+    { id: 'noble', name: 'Аристократ', description: 'Представитель знати' },
+    { id: 'sage', name: 'Мудрец', description: 'Ученый и исследователь' },
+    { id: 'soldier', name: 'Солдат', description: 'Опытный воин' },
 ];
 
 const ALIGNMENTS = [
-    { id: 'lg', name: 'Законно-добрый', description: 'Добро через закон и порядок' },
-    { id: 'ng', name: 'Нейтрально-добрый', description: 'Добро превыше всего' },
+    { id: 'lg', name: 'Законно-добрый', description: 'Честь и справедливость' },
+    { id: 'ng', name: 'Нейтрально-добрый', description: 'Доброта превыше всего' },
     { id: 'cg', name: 'Хаотично-добрый', description: 'Добро через свободу' },
     { id: 'ln', name: 'Законно-нейтральный', description: 'Порядок и традиции' },
     { id: 'n', name: 'Истинно нейтральный', description: 'Баланс всего' },
@@ -158,7 +158,7 @@ const CharacterCreatePage: React.FC = () => {
 
             const character = await characterService.createCharacter(data);
             toast.success('Персонаж успешно создан!');
-            navigate(`/characters/${character.id}/edit`);
+            navigate(`/characters/${character.id}`);
         } catch (error: any) {
             console.error('Failed to create character:', error);
             toast.error('Ошибка при создании персонажа');
@@ -194,12 +194,12 @@ const CharacterCreatePage: React.FC = () => {
                                         />
                                         <div className="flex flex-1">
                                             <div className="flex flex-col">
-                        <span className="block text-sm font-medium text-gray-900 dark:text-white">
-                          {alignment.name}
-                        </span>
+                                                <span className="block text-sm font-medium text-gray-900 dark:text-white">
+                                                    {alignment.name}
+                                                </span>
                                                 <span className="block text-sm text-gray-500 dark:text-gray-400">
-                          {alignment.description}
-                        </span>
+                                                    {alignment.description}
+                                                </span>
                                             </div>
                                         </div>
                                     </label>
@@ -212,8 +212,7 @@ const CharacterCreatePage: React.FC = () => {
             case 'race':
                 return (
                     <div className="space-y-4">
-                        <h3 className="text-lg font-medium">Выберите расу</h3>
-                        <div className="grid grid-cols-1 gap-3">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             {RACES.map((race) => (
                                 <label
                                     key={race.id}
@@ -227,12 +226,12 @@ const CharacterCreatePage: React.FC = () => {
                                     />
                                     <div className="flex flex-1">
                                         <div className="flex flex-col">
-                      <span className="block text-sm font-medium text-gray-900 dark:text-white">
-                        {race.name}
-                      </span>
+                                            <span className="block text-sm font-medium text-gray-900 dark:text-white">
+                                                {race.name}
+                                            </span>
                                             <span className="block text-sm text-gray-500 dark:text-gray-400">
-                        {race.description}
-                      </span>
+                                                {race.description}
+                                            </span>
                                         </div>
                                     </div>
                                 </label>
@@ -244,8 +243,7 @@ const CharacterCreatePage: React.FC = () => {
             case 'class':
                 return (
                     <div className="space-y-4">
-                        <h3 className="text-lg font-medium">Выберите класс</h3>
-                        <div className="grid grid-cols-1 gap-3">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             {CLASSES.map((charClass) => (
                                 <label
                                     key={charClass.id}
@@ -257,17 +255,17 @@ const CharacterCreatePage: React.FC = () => {
                                         className="sr-only"
                                         {...register('character_class', { required: 'Выберите класс' })}
                                     />
-                                    <div className="flex flex-1 justify-between">
+                                    <div className="flex flex-1">
                                         <div className="flex flex-col">
-                      <span className="block text-sm font-medium text-gray-900 dark:text-white">
-                        {charClass.name}
-                      </span>
+                                            <span className="block text-sm font-medium text-gray-900 dark:text-white">
+                                                {charClass.name}
+                                            </span>
                                             <span className="block text-sm text-gray-500 dark:text-gray-400">
-                        {charClass.description}
-                      </span>
-                                        </div>
-                                        <div className="text-sm text-gray-500 dark:text-gray-400">
-                                            Кость здоровья: d{charClass.hitDie}
+                                                {charClass.description}
+                                            </span>
+                                            <span className="block text-xs text-blue-600 dark:text-blue-400 mt-1">
+                                                Кость хитов: d{charClass.hitDie}
+                                            </span>
                                         </div>
                                     </div>
                                 </label>
@@ -279,7 +277,6 @@ const CharacterCreatePage: React.FC = () => {
             case 'background':
                 return (
                     <div className="space-y-4">
-                        <h3 className="text-lg font-medium">Выберите предыстория</h3>
                         <div className="grid grid-cols-1 gap-3">
                             {BACKGROUNDS.map((background) => (
                                 <label
@@ -294,12 +291,12 @@ const CharacterCreatePage: React.FC = () => {
                                     />
                                     <div className="flex flex-1">
                                         <div className="flex flex-col">
-                      <span className="block text-sm font-medium text-gray-900 dark:text-white">
-                        {background.name}
-                      </span>
+                                            <span className="block text-sm font-medium text-gray-900 dark:text-white">
+                                                {background.name}
+                                            </span>
                                             <span className="block text-sm text-gray-500 dark:text-gray-400">
-                        {background.description}
-                      </span>
+                                                {background.description}
+                                            </span>
                                         </div>
                                     </div>
                                 </label>
@@ -311,99 +308,83 @@ const CharacterCreatePage: React.FC = () => {
             case 'abilities':
                 return (
                     <div className="space-y-6">
-                        <div className="text-center">
-                            <h3 className="text-lg font-medium mb-2">Распределение характеристик</h3>
-                            <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
-                                Система покупки очков (Point Buy)
+                        <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg">
+                            <h3 className="text-lg font-medium text-blue-900 dark:text-blue-100 mb-2">
+                                Point Buy System
+                            </h3>
+                            <p className="text-sm text-blue-700 dark:text-blue-300 mb-3">
+                                У вас есть 27 очков для распределения между характеристиками.
+                                Каждая характеристика начинается с 8.
                             </p>
-                            <div className="bg-primary-50 dark:bg-primary-900 rounded-lg p-4">
-                                <p className="text-lg font-semibold text-primary-900 dark:text-primary-100">
-                                    Осталось очков: {remainingPoints}
-                                </p>
+                            <div className="text-sm font-medium text-blue-900 dark:text-blue-100">
+                                Осталось очков: {remainingPoints}
                             </div>
                         </div>
 
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                            {[
-                                { key: 'strength', name: 'Сила' },
-                                { key: 'dexterity', name: 'Ловкость' },
-                                { key: 'constitution', name: 'Телосложение' },
-                                { key: 'intelligence', name: 'Интеллект' },
-                                { key: 'wisdom', name: 'Мудрость' },
-                                { key: 'charisma', name: 'Харизма' },
-                            ].map(({ key, name }) => {
-                                const score = watchedValues[key as keyof FormData] as number;
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            {['strength', 'dexterity', 'constitution', 'intelligence', 'wisdom', 'charisma'].map((ability) => {
+                                const score = watchedValues[ability as keyof FormData] as number;
                                 const modifier = getAbilityModifier(score);
+                                const abilityNames: Record<string, string> = {
+                                    strength: 'Сила',
+                                    dexterity: 'Ловкость',
+                                    constitution: 'Телосложение',
+                                    intelligence: 'Интеллект',
+                                    wisdom: 'Мудрость',
+                                    charisma: 'Харизма'
+                                };
 
                                 return (
-                                    <Card key={key} className="p-4">
-                                        <div className="text-center space-y-3">
-                                            <h4 className="font-medium text-gray-900 dark:text-white">
-                                                {name}
-                                            </h4>
-
-                                            <div className="flex items-center justify-center space-x-3">
-                                                <Button
-                                                    type="button"
-                                                    variant="outline"
-                                                    size="sm"
-                                                    onClick={() => adjustAbility(key as keyof FormData, -1)}
-                                                    disabled={score <= 8}
-                                                >
-                                                    -
-                                                </Button>
-
-                                                <div className="text-center min-w-[60px]">
-                                                    <div className="text-2xl font-bold text-gray-900 dark:text-white">
-                                                        {score}
-                                                    </div>
-                                                    <div className="text-sm text-gray-500 dark:text-gray-400">
-                                                        {formatModifier(modifier)}
-                                                    </div>
-                                                </div>
-
-                                                <Button
-                                                    type="button"
-                                                    variant="outline"
-                                                    size="sm"
-                                                    onClick={() => adjustAbility(key as keyof FormData, 1)}
-                                                    disabled={!canIncreaseAbility(score)}
-                                                >
-                                                    +
-                                                </Button>
+                                    <div key={ability} className="space-y-2">
+                                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                                            {abilityNames[ability]}
+                                        </label>
+                                        <div className="flex items-center space-x-3">
+                                            <Button
+                                                type="button"
+                                                variant="outline"
+                                                size="sm"
+                                                onClick={() => adjustAbility(ability as keyof FormData, -1)}
+                                                disabled={score <= 8}
+                                            >
+                                                -
+                                            </Button>
+                                            <div className="flex items-center space-x-2 min-w-[120px] justify-center">
+                                                <span className="text-2xl font-bold text-gray-900 dark:text-white">
+                                                    {score}
+                                                </span>
+                                                <span className="text-sm text-gray-500 dark:text-gray-400">
+                                                    ({formatModifier(modifier)})
+                                                </span>
                                             </div>
-
-                                            <div className="text-xs text-gray-500 dark:text-gray-400">
-                                                Стоимость: {getPointCost(score)}
-                                            </div>
+                                            <Button
+                                                type="button"
+                                                variant="outline"
+                                                size="sm"
+                                                onClick={() => adjustAbility(ability as keyof FormData, 1)}
+                                                disabled={!canIncreaseAbility(score)}
+                                            >
+                                                +
+                                            </Button>
                                         </div>
-                                    </Card>
+                                        <div className="text-xs text-gray-500 dark:text-gray-400">
+                                            Стоимость: {getPointCost(score)} очков
+                                        </div>
+                                    </div>
                                 );
                             })}
                         </div>
 
                         {selectedClass && (
-                            <Card className="bg-blue-50 dark:bg-blue-900 border-blue-200 dark:border-blue-700">
-                                <CardContent className="p-4">
-                                    <h4 className="font-medium text-blue-900 dark:text-blue-100 mb-2">
-                                        Предварительные характеристики
-                                    </h4>
-                                    <div className="grid grid-cols-2 gap-4 text-sm">
-                                        <div>
-                                            <span className="text-blue-700 dark:text-blue-300">Очки здоровья: </span>
-                                            <span className="font-medium">
-                        {selectedClass.hitDie + getAbilityModifier(watchedValues.constitution)}
-                      </span>
-                                        </div>
-                                        <div>
-                                            <span className="text-blue-700 dark:text-blue-300">Класс брони: </span>
-                                            <span className="font-medium">
-                        {10 + getAbilityModifier(watchedValues.dexterity)}
-                      </span>
-                                        </div>
-                                    </div>
-                                </CardContent>
-                            </Card>
+                            <div className="bg-green-50 dark:bg-green-900/20 p-4 rounded-lg">
+                                <h4 className="text-sm font-medium text-green-900 dark:text-green-100 mb-2">
+                                    Предварительные характеристики
+                                </h4>
+                                <div className="grid grid-cols-2 gap-2 text-sm text-green-700 dark:text-green-300">
+                                    <div>Хиты: {calculateMaxHP(watchedValues.constitution || 8, selectedClass.hitDie, 1)}</div>
+                                    <div>Класс Доспеха: {10 + getAbilityModifier(watchedValues.dexterity || 8)}</div>
+                                </div>
+                            </div>
                         )}
                     </div>
                 );
@@ -411,29 +392,15 @@ const CharacterCreatePage: React.FC = () => {
             case 'details':
                 return (
                     <div className="space-y-6">
-                        <h3 className="text-lg font-medium">Детали персонажа</h3>
-
-                        <div className="grid grid-cols-1 gap-6">
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                                    Внешность
-                                </label>
-                                <textarea
-                                    className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-primary-500 focus:border-primary-500"
-                                    rows={3}
-                                    placeholder="Опишите внешность вашего персонажа..."
-                                    {...register('appearance')}
-                                />
-                            </div>
-
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                             <div>
                                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                                     Черты характера
                                 </label>
                                 <textarea
                                     className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-primary-500 focus:border-primary-500"
-                                    rows={2}
-                                    placeholder="Как ведет себя ваш персонаж?"
+                                    rows={3}
+                                    placeholder="Особенности личности..."
                                     {...register('personality_traits')}
                                 />
                             </div>
@@ -444,8 +411,8 @@ const CharacterCreatePage: React.FC = () => {
                                 </label>
                                 <textarea
                                     className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-primary-500 focus:border-primary-500"
-                                    rows={2}
-                                    placeholder="Во что верит ваш персонаж?"
+                                    rows={3}
+                                    placeholder="Во что верит персонаж..."
                                     {...register('ideals')}
                                 />
                             </div>
@@ -456,8 +423,8 @@ const CharacterCreatePage: React.FC = () => {
                                 </label>
                                 <textarea
                                     className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-primary-500 focus:border-primary-500"
-                                    rows={2}
-                                    placeholder="Что важно для вашего персонажа?"
+                                    rows={3}
+                                    placeholder="Что важно для персонажа..."
                                     {...register('bonds')}
                                 />
                             </div>
@@ -468,23 +435,23 @@ const CharacterCreatePage: React.FC = () => {
                                 </label>
                                 <textarea
                                     className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-primary-500 focus:border-primary-500"
-                                    rows={2}
-                                    placeholder="Какие у персонажа есть недостатки?"
+                                    rows={3}
+                                    placeholder="Недостатки персонажа..."
                                     {...register('flaws')}
                                 />
                             </div>
+                        </div>
 
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                                    Предыстория
-                                </label>
-                                <textarea
-                                    className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-primary-500 focus:border-primary-500"
-                                    rows={4}
-                                    placeholder="Расскажите историю вашего персонажа..."
-                                    {...register('backstory')}
-                                />
-                            </div>
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                Предыстория
+                            </label>
+                            <textarea
+                                className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-primary-500 focus:border-primary-500"
+                                rows={4}
+                                placeholder="Расскажите историю вашего персонажа..."
+                                {...register('backstory')}
+                            />
                         </div>
                     </div>
                 );
@@ -493,6 +460,9 @@ const CharacterCreatePage: React.FC = () => {
                 return null;
         }
     };
+
+    // ИСПРАВЛЕНИЕ: Деструктурируем иконку из текущего шага
+    const CurrentStepIcon = STEPS[currentStep].icon;
 
     return (
         <div className="max-w-4xl mx-auto space-y-8">
@@ -555,7 +525,8 @@ const CharacterCreatePage: React.FC = () => {
             <Card>
                 <CardHeader>
                     <CardTitle className="flex items-center space-x-2">
-                        <STEPS[currentStep].icon className="w-6 h-6" />
+                        {/* ИСПРАВЛЕНИЕ: Используем деструктурированную иконку */}
+                        <CurrentStepIcon className="w-6 h-6" />
                         <span>{STEPS[currentStep].title}</span>
                     </CardTitle>
                 </CardHeader>
@@ -590,8 +561,7 @@ const CharacterCreatePage: React.FC = () => {
                     <Button
                         variant="fantasy"
                         onClick={handleSubmit(onSubmit)}
-                        loading={isSubmitting}
-                        disabled={remainingPoints !== 0}
+                        disabled={isSubmitting || remainingPoints !== 0}
                         className="flex items-center space-x-2"
                     >
                         <SparklesIcon className="w-4 h-4" />
