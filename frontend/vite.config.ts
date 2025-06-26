@@ -18,21 +18,25 @@ export default defineConfig({
         },
     },
     server: {
+        host: '0.0.0.0', // Слушать на всех интерфейсах
         port: 3000,
-        proxy: {
-            '/api': {
-                target: 'http://192.168.4.55:8000',
-                changeOrigin: true,
-                secure: false,
-            },
-            '/ws': {
-                target: 'ws://192.168.4.55:8000',
-                ws: true,
-            },
-        },
+        strictPort: true,
+        open: false, // Не открывать браузер автоматически
+        cors: true, // Включить CORS
+        hmr: {
+            port: 3001 // HMR на отдельном порту
+        }
+    },
+    // Убедимся что Vite знает где искать файлы
+    root: process.cwd(), // Текущая рабочая директория
+    publicDir: 'public', // Папка для статических файлов
+    // Настройки для корректной работы с TypeScript
+    esbuild: {
+        target: 'es2020'
     },
     build: {
         sourcemap: true,
+        target: 'es2020',
         rollupOptions: {
             output: {
                 manualChunks: {
