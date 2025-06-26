@@ -1,286 +1,365 @@
-import { io, Socket } from 'socket.io-client';
 import { getFromStorage } from '@/utils';
-import type { WebSocketMessage, GameMessage, DiceRollData, AuthTokens } from '@/types';
+import type { AuthTokens } from '@/types';
 
+// WebSocket сообщения
+export interface WebSocketMessage {
+    type: 'chat' | 'action' | 'roll' | 'join' | 'leave' | 'initiative' | 'ai_response' | 'game_state_update' | 'player_update' | 'system';
+    data: any;
+    sender_id?: string;
+    timestamp: string;
+    game_id?: string;
+}
+
+// События WebSocket
 export type WebSocketEventType =
     | 'connected'
+    | 'disconnected'
+    | 'message'
     | 'player_joined'
     | 'player_left'
-    | 'chat_message'
-    | 'player_action'
-    | 'dice_roll'
-    | 'dm_response'
-    | 'character_updated'
-    | 'roll_prompt'
-    | 'players_list'
-    | 'message_history'
+    | 'dice_rolled'
+    | 'initiative_rolled'
+    | 'turn_changed'
+    | 'scene_updated'
+    | 'ai_response'
     | 'error';
 
-export interface WebSocketEventHandler {
-    (data: any): void;
+export type WebSocketEventHandler = (data?: any) => void;
+
+// Состояние подключения
+export enum ConnectionState {
+    DISCONNECTED = 'disconnected',
+    CONNECTING = 'connecting',
+    CONNECTED = 'connected',
+    RECONNECTING = 'reconnecting',
+    ERROR = 'error',
+}
+
+// Конфигурация WebSocket
+interface WebSocketConfig {
+    url: string;
+    reconnectInterval: number;
+    maxReconnectAttempts: number;
+    heartbeatInterval: number;
 }
 
 class WebSocketService {
-    private socket: Socket | null = null;
+    private ws: WebSocket | null = null;
+    private config: WebSocketConfig;
+    private eventHandlers: Map<WebSocketEventType, Set<WebSocketEventHandler>> = new Map();
+    private connectionState: ConnectionState = ConnectionState.DISCONNECTED;
+    private reconnectAttempts: number = 0;
+    private reconnectTimer: NodeJS.Timeout | null = null;
+    private heartbeatTimer: NodeJS.Timeout | null = null;
     private gameId: string | null = null;
-    private eventHandlers: Map<WebSocketEventType, WebSocketEventHandler[]> = new Map();
-    private reconnectAttempts = 0;
-    private maxReconnectAttempts = 5;
-    private reconnectDelay = 1000;
+    private isManualClose: boolean = false;
 
-    // Cleanup
-    cleanup(): void {
-        this.eventHandlers.clear();
-        this.disconnect();
-    }
-}
+    constructor() {
+        this.config = {
+            url: import.meta.env.VITE_WS_URL || 'ws://localhost:8000',
+            reconnectInterval: 3000,
+            maxReconnectAttempts: 5,
+            heartbeatInterval: 30000,
+        };
 
-// Export singleton instance
-export const websocketService = new WebSocketService();
-export default websocketService; Connect to game WebSocket
-async connect(gameId: string): Promise<void> {
-    if (this.socket?.connected) {
-    await this.disconnect();
-}
+        // Инициализируем Map с пустыми Set для каждого типа события
+        const eventTypes: WebSocketEventType[] = [
+            'connected', 'disconnected', 'message', 'player_joined',
+            'player_left', 'dice_rolled', 'initiative_rolled',
+            'turn_changed', 'scene_updated', 'ai_response', 'error'
+        ];
 
-const tokens = getFromStorage<AuthTokens | null>('auth_tokens', null);
-if (!tokens?.access_token) {
-    throw new Error('No authentication token available');
-}
-
-const wsUrl = import.meta.env.VITE_WS_URL || 'ws://localhost:8000';
-
-this.gameId = gameId;
-this.socket = io(wsUrl, {
-    path: `/api/ws/game/${gameId}`,
-    query: {
-        token: tokens.access_token,
-    },
-    autoConnect: false,
-    reconnection: true,
-    reconnectionAttempts: this.maxReconnectAttempts,
-    reconnectionDelay: this.reconnectDelay,
-});
-
-this.setupEventListeners();
-
-return new Promise((resolve, reject) => {
-    if (!this.socket) {
-        reject(new Error('Failed to create socket'));
-        return;
+        eventTypes.forEach(type => {
+            this.eventHandlers.set(type, new Set());
+        });
     }
 
-    this.socket.on('connect', () => {
-        console.log(`Connected to game ${gameId}`);
-        this.reconnectAttempts = 0;
-        resolve();
-    });
-
-    this.socket.on('connect_error', (error) => {
-        console.error('WebSocket connection error:', error);
-        reject(error);
-    });
-
-    this.socket.connect();
-});
-}
-
-// Disconnect from WebSocket
-async disconnect(): Promise<void> {
-    if (this.socket) {
-    this.socket.disconnect();
-    this.socket = null;
-    this.gameId = null;
-    console.log('Disconnected from WebSocket');
-}
-}
-
-// Setup event listeners
-private setupEventListeners(): void {
-    if (!this.socket) return;
-
-// Connection events
-this.socket.on('connect', () => {
-    this.emit('connected', { gameId: this.gameId });
-});
-
-this.socket.on('disconnect', (reason) => {
-    console.log('WebSocket disconnected:', reason);
-    if (reason === 'io server disconnect') {
-        // Server initiated disconnect, don't reconnect
-        this.emit('error', { message: 'Disconnected by server' });
-    }
-});
-
-this.socket.on('reconnect', (attemptNumber) => {
-    console.log(`Reconnected after ${attemptNumber} attempts`);
-    this.emit('connected', { gameId: this.gameId, reconnected: true });
-});
-
-this.socket.on('reconnect_error', (error) => {
-    console.error('Reconnection failed:', error);
-    this.emit('error', { message: 'Failed to reconnect', error });
-});
-
-// Game events
-this.socket.on('message', (message: WebSocketMessage) => {
-    this.handleMessage(message);
-});
-
-// Error handling
-this.socket.on('error', (error) => {
-    console.error('WebSocket error:', error);
-    this.emit('error', error);
-});
-}
-
-// Handle incoming messages
-private handleMessage(message: WebSocketMessage): void {
-    const { type, data } = message;
-
-    console.log(`WebSocket message: ${type}`, data);
-
-    switch (type) {
-    case 'connected':
-    case 'player_joined':
-    case 'player_left':
-    case 'chat_message':
-    case 'player_action':
-    case 'dice_roll':
-    case 'dm_response':
-    case 'character_updated':
-    case 'roll_prompt':
-    case 'players_list':
-    case 'message_history':
-    case 'error':
-        this.emit(type as WebSocketEventType, data);
-        break;
-    default:
-        console.warn('Unknown message type:', type);
-    }
-}
-
-// Send chat message
-sendChatMessage(content: string, isOOC: boolean = false, characterId?: string): void {
-    this.sendMessage('chat_message', {
-        content,
-        is_ooc: isOOC,
-        character_id: characterId,
-    });
-}
-
-// Send player action
-sendPlayerAction(action: string, characterId?: string): void {
-    this.sendMessage('player_action', {
-        action,
-        character_id: characterId,
-    });
-}
-
-// Send dice roll
-sendDiceRoll(
-    diceNotation: string,
-    purpose?: string,
-    characterId?: string,
-    advantage?: boolean,
-    disadvantage?: boolean,
-    modifiers?: Record<string, number>
-): void {
-    this.sendMessage('dice_roll', {
-        dice_notation: diceNotation,
-        purpose,
-        character_id: characterId,
-        advantage,
-        disadvantage,
-        modifiers,
-    });
-}
-
-// Update character
-updateCharacter(characterId: string, updates: Record<string, any>): void {
-    this.sendMessage('character_update', {
-        character_id: characterId,
-        updates,
-    });
-}
-
-// Send game command
-sendGameCommand(command: string, args?: Record<string, any>): void {
-    this.sendMessage('game_command', {
-        command,
-        args: args || {},
-    });
-}
-
-// Generic message sender
-private sendMessage(type: string, data: any): void {
-    if (!this.socket?.connected) {
-    console.error('WebSocket not connected');
-    this.emit('error', { message: 'Not connected to game' });
-    return;
-}
-
-const message = {
-    type,
-    data,
-    timestamp: new Date().toISOString(),
-};
-
-this.socket.emit('message', message);
-}
-
-// Event handler management
-on(event: WebSocketEventType, handler: WebSocketEventHandler): void {
-    if (!this.eventHandlers.has(event)) {
-    this.eventHandlers.set(event, []);
-}
-this.eventHandlers.get(event)!.push(handler);
-}
-
-off(event: WebSocketEventType, handler: WebSocketEventHandler): void {
-    const handlers = this.eventHandlers.get(event);
-    if (handlers) {
-        const index = handlers.indexOf(handler);
-        if (index > -1) {
-            handlers.splice(index, 1);
+    // Подключение к игровой сессии
+    async connect(gameId: string): Promise<void> {
+        if (this.connectionState === ConnectionState.CONNECTED && this.gameId === gameId) {
+            return; // Уже подключены к этой игре
         }
-    }
-}
 
-private emit(event: WebSocketEventType, data: any): void {
-    const handlers = this.eventHandlers.get(event);
-    if (handlers) {
-        handlers.forEach(handler => {
+        this.gameId = gameId;
+        this.isManualClose = false;
+
+        await this.disconnect(); // Отключаемся от предыдущей игры
+        await this.establishConnection();
+    }
+
+    // Установка подключения
+    private async establishConnection(): Promise<void> {
+        if (!this.gameId) {
+            throw new Error('Game ID is required for connection');
+        }
+
+        return new Promise((resolve, reject) => {
             try {
-                handler(data);
+                this.setConnectionState(ConnectionState.CONNECTING);
+
+                // Получаем токен авторизации
+                const tokens = getFromStorage<AuthTokens | null>('auth_tokens', null);
+                if (!tokens?.access_token) {
+                    throw new Error('Authentication required');
+                }
+
+                // Создаем WebSocket подключение
+                const wsUrl = `${this.config.url}/api/ws/game/${this.gameId}?token=${tokens.access_token}`;
+                this.ws = new WebSocket(wsUrl);
+
+                // Обработчики событий WebSocket
+                this.ws.onopen = () => {
+                    console.log(`WebSocket connected to game ${this.gameId}`);
+                    this.setConnectionState(ConnectionState.CONNECTED);
+                    this.reconnectAttempts = 0;
+                    this.startHeartbeat();
+                    this.emit('connected');
+                    resolve();
+                };
+
+                this.ws.onmessage = (event) => {
+                    try {
+                        const message: WebSocketMessage = JSON.parse(event.data);
+                        this.handleMessage(message);
+                    } catch (error) {
+                        console.error('Failed to parse WebSocket message:', error);
+                        this.emit('error', { type: 'parse_error', error });
+                    }
+                };
+
+                this.ws.onclose = (event) => {
+                    console.log('WebSocket disconnected:', event.code, event.reason);
+                    this.setConnectionState(ConnectionState.DISCONNECTED);
+                    this.stopHeartbeat();
+                    this.emit('disconnected', { code: event.code, reason: event.reason });
+
+                    // Автоматическое переподключение если не был ручной разрыв
+                    if (!this.isManualClose && this.reconnectAttempts < this.config.maxReconnectAttempts) {
+                        this.scheduleReconnect();
+                    }
+                };
+
+                this.ws.onerror = (error) => {
+                    console.error('WebSocket error:', error);
+                    this.setConnectionState(ConnectionState.ERROR);
+                    this.emit('error', { type: 'connection_error', error });
+                    reject(error);
+                };
+
             } catch (error) {
-                console.error(`Error in WebSocket event handler for ${event}:`, error);
+                this.setConnectionState(ConnectionState.ERROR);
+                this.emit('error', { type: 'setup_error', error });
+                reject(error);
             }
         });
     }
+
+    // Планирование переподключения
+    private scheduleReconnect(): void {
+        if (this.reconnectTimer) {
+            clearTimeout(this.reconnectTimer);
+        }
+
+        this.reconnectAttempts++;
+        const delay = this.config.reconnectInterval * this.reconnectAttempts;
+
+        console.log(`Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts})`);
+        this.setConnectionState(ConnectionState.RECONNECTING);
+
+        this.reconnectTimer = setTimeout(async () => {
+            try {
+                await this.establishConnection();
+            } catch (error) {
+                console.error('Reconnection failed:', error);
+            }
+        }, delay);
+    }
+
+    // Отключение
+    async disconnect(): Promise<void> {
+        this.isManualClose = true;
+        this.gameId = null;
+
+        if (this.reconnectTimer) {
+            clearTimeout(this.reconnectTimer);
+            this.reconnectTimer = null;
+        }
+
+        this.stopHeartbeat();
+
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+            this.ws.close(1000, 'Manual disconnect');
+        }
+
+        this.ws = null;
+        this.setConnectionState(ConnectionState.DISCONNECTED);
+    }
+
+    // Отправка сообщения
+    send(type: string, data: any): void {
+        if (!this.isConnected()) {
+            console.warn('WebSocket not connected, message not sent:', type, data);
+            return;
+        }
+
+        const message: WebSocketMessage = {
+            type: type as any,
+            data,
+            timestamp: new Date().toISOString(),
+            game_id: this.gameId || undefined,
+        };
+
+        try {
+            this.ws!.send(JSON.stringify(message));
+        } catch (error) {
+            console.error('Failed to send WebSocket message:', error);
+            this.emit('error', { type: 'send_error', error });
+        }
+    }
+
+    // Отправка чат сообщения
+    sendChatMessage(content: string): void {
+        this.send('chat', { content });
+    }
+
+    // Отправка действия
+    sendAction(action: string, details?: any): void {
+        this.send('action', { action, ...details });
+    }
+
+    // Бросок костей
+    sendDiceRoll(notation: string, purpose?: string): void {
+        this.send('roll', { notation, purpose });
+    }
+
+    // Инициатива
+    sendInitiativeRoll(characterId: string): void {
+        this.send('initiative', { character_id: characterId });
+    }
+
+    // Обработка входящих сообщений
+    private handleMessage(message: WebSocketMessage): void {
+        console.log('Received WebSocket message:', message);
+
+        // Эмитируем общее событие message
+        this.emit('message', message);
+
+        // Эмитируем специфические события в зависимости от типа
+        switch (message.type) {
+            case 'chat':
+            case 'action':
+            case 'system':
+                this.emit('message', message);
+                break;
+
+            case 'roll':
+                this.emit('dice_rolled', message.data);
+                break;
+
+            case 'initiative':
+                this.emit('initiative_rolled', message.data);
+                break;
+
+            case 'join':
+                this.emit('player_joined', message.data);
+                break;
+
+            case 'leave':
+                this.emit('player_left', message.data);
+                break;
+
+            case 'ai_response':
+                this.emit('ai_response', message.data);
+                break;
+
+            case 'game_state_update':
+                if (message.data.scene_description) {
+                    this.emit('scene_updated', message.data);
+                }
+                if (message.data.current_turn) {
+                    this.emit('turn_changed', message.data);
+                }
+                break;
+
+            default:
+                console.log('Unknown message type:', message.type);
+        }
+    }
+
+    // Подписка на события
+    on(event: WebSocketEventType, handler: WebSocketEventHandler): void {
+        const handlers = this.eventHandlers.get(event);
+        if (handlers) {
+            handlers.add(handler);
+        }
+    }
+
+    // Отписка от событий
+    off(event: WebSocketEventType, handler: WebSocketEventHandler): void {
+        const handlers = this.eventHandlers.get(event);
+        if (handlers) {
+            handlers.delete(handler);
+        }
+    }
+
+    // Эмит события
+    private emit(event: WebSocketEventType, data?: any): void {
+        const handlers = this.eventHandlers.get(event);
+        if (handlers) {
+            handlers.forEach(handler => {
+                try {
+                    handler(data);
+                } catch (error) {
+                    console.error(`Error in ${event} handler:`, error);
+                }
+            });
+        }
+    }
+
+    // Установка состояния подключения
+    private setConnectionState(state: ConnectionState): void {
+        if (this.connectionState !== state) {
+            this.connectionState = state;
+            console.log('WebSocket state changed:', state);
+        }
+    }
+
+    // Heartbeat для поддержания соединения
+    private startHeartbeat(): void {
+        this.stopHeartbeat();
+        this.heartbeatTimer = setInterval(() => {
+            if (this.isConnected()) {
+                this.send('ping', { timestamp: Date.now() });
+            }
+        }, this.config.heartbeatInterval);
+    }
+
+    private stopHeartbeat(): void {
+        if (this.heartbeatTimer) {
+            clearInterval(this.heartbeatTimer);
+            this.heartbeatTimer = null;
+        }
+    }
+
+    // Геттеры
+    isConnected(): boolean {
+        return this.connectionState === ConnectionState.CONNECTED &&
+            this.ws?.readyState === WebSocket.OPEN;
+    }
+
+    getConnectionState(): ConnectionState {
+        return this.connectionState;
+    }
+
+    getCurrentGameId(): string | null {
+        return this.gameId;
+    }
+
+    getReconnectAttempts(): number {
+        return this.reconnectAttempts;
+    }
 }
 
-// Connection status
-isConnected(): boolean {
-    return this.socket?.connected || false;
-}
-
-getGameId(): string | null {
-    return this.gameId;
-}
-
-// Utility methods
-getPlayersOnline(): void {
-    this.sendGameCommand('get_players');
-}
-
-saveGameState(): void {
-    this.sendGameCommand('save_game');
-}
-
-loadGameState(): void {
-    this.sendGameCommand('load_game');
-}
-}
-
-//
+// Экспорт синглтона
+export const websocketService = new WebSocketService();
+export default websocketService;
