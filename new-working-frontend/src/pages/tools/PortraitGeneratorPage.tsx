@@ -72,7 +72,7 @@ const PortraitGeneratorPage: React.FC = () => {
             // Используем правильный эндпоинт для автономной генерации портретов
             // Поскольку это генератор портретов не для конкретного персонажа,
             // нам нужен общий эндпоинт генерации изображений
-            const response = await apiService.post('/api/images/generate', {
+            const response = await apiService.post('/images/generate', {
                 prompt: fullPrompt,
                 style: selectedStyle,
                 width: 512,

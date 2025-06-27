@@ -10,7 +10,9 @@ class ApiService {
 
     constructor() {
         this.api = axios.create({
-            baseURL: `${API_BASE_URL}/api`,
+            // ✅ ИСПРАВЛЕНИЕ: убираем /api из baseURL
+            // Vite proxy уже добавляет /api в dev режиме
+            baseURL: import.meta.env.DEV ? '/api' : `${API_BASE_URL}/api`,
             timeout: 30000,
             headers: {
                 'Content-Type': 'application/json',
@@ -171,6 +173,7 @@ class ApiService {
 
     // Health check
     async healthCheck(): Promise<{ status: string; services: Record<string, string> }> {
+        // ✅ ИСПРАВЛЕНИЕ: для health check используем прямой URL без proxy
         const response = await axios.get(`${API_BASE_URL}/health`);
         return response.data;
     }
