@@ -62,7 +62,7 @@ class CampaignResponse(BaseModel):
         from_attributes = True
 
 
-@router.post("/", response_model=CampaignResponse)
+@router.post("", response_model=CampaignResponse)
 async def create_campaign(
         campaign_data: CampaignCreate,
         current_user: User = Depends(get_current_user),
@@ -82,7 +82,21 @@ async def create_campaign(
 
         logger.info(f"Campaign created: {campaign.name} by {current_user.username}")
 
-        campaign_info = campaign.get_campaign_info()
+        # Простая версия без методов модели
+        campaign_info = {
+            "id": str(campaign.id),
+            "name": campaign.name,
+            "description": campaign.description,
+            "setting": campaign.setting,
+            "status": campaign.status.value if hasattr(campaign.status, 'value') else str(campaign.status),
+            "creator_id": str(campaign.creator_id),
+            "current_players": getattr(campaign, 'current_players', 0),
+            "max_players": campaign.max_players,
+            "starting_level": campaign.starting_level,
+            "is_public": campaign.is_public,
+            "created_at": campaign.created_at.isoformat()
+        }
+
         return CampaignResponse(**campaign_info)
 
     except Exception as e:
@@ -94,7 +108,7 @@ async def create_campaign(
         )
 
 
-@router.get("/", response_model=List[CampaignResponse])
+@router.get("", response_model=List[CampaignResponse])
 async def get_campaigns(
         status_filter: Optional[str] = None,
         public_only: bool = False,
@@ -131,13 +145,28 @@ async def get_campaigns(
 
         response_data = []
         for campaign in campaigns:
-            if public_only and not campaign.is_public:
-                campaign_info = campaign.get_public_info()
-            else:
-                campaign_info = campaign.get_campaign_info()
+            try:
+                # Простая версия без методов модели
+                campaign_info = {
+                    "id": str(campaign.id),
+                    "name": campaign.name,
+                    "description": campaign.description,
+                    "setting": campaign.setting,
+                    "status": campaign.status.value if hasattr(campaign.status, 'value') else str(campaign.status),
+                    "creator_id": str(campaign.creator_id),
+                    "current_players": getattr(campaign, 'current_players', 0),
+                    "max_players": campaign.max_players,
+                    "starting_level": campaign.starting_level,
+                    "is_public": campaign.is_public,
+                    "created_at": campaign.created_at.isoformat()
+                }
 
-            response_data.append(CampaignResponse(**campaign_info))
+                response_data.append(CampaignResponse(**campaign_info))
+            except Exception as e:
+                logger.error(f"Error processing campaign {campaign.id}: {e}")
+                continue
 
+        logger.info(f"Returned {len(response_data)} campaigns for user {current_user.username}")
         return response_data
 
     except HTTPException:
@@ -171,20 +200,36 @@ async def get_campaign(
         # Проверяем права доступа
         user_id = str(current_user.id)
         is_creator = str(campaign.creator_id) == user_id
-        is_player = user_id in campaign.players
         is_public = campaign.is_public
 
-        if not (is_creator or is_player or is_public):
+        if not (is_creator or is_public):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Access denied"
             )
 
-        # Возвращаем соответствующую информацию
-        if is_creator or is_player:
-            return campaign.get_campaign_info()
-        else:
-            return campaign.get_public_info()
+        # Простая версия без методов модели
+        campaign_info = {
+            "id": str(campaign.id),
+            "name": campaign.name,
+            "description": campaign.description,
+            "setting": campaign.setting,
+            "status": campaign.status.value if hasattr(campaign.status, 'value') else str(campaign.status),
+            "creator_id": str(campaign.creator_id),
+            "current_players": getattr(campaign, 'current_players', 0),
+            "max_players": campaign.max_players,
+            "starting_level": campaign.starting_level,
+            "is_public": campaign.is_public,
+            "created_at": campaign.created_at.isoformat(),
+            "world_description": getattr(campaign, 'world_description', None),
+            "main_story": getattr(campaign, 'main_story', None),
+            "house_rules": getattr(campaign, 'house_rules', None),
+            "ai_personality": getattr(campaign, 'ai_personality', None),
+            "ai_style": getattr(campaign, 'ai_style', 'balanced'),
+            "requires_approval": getattr(campaign, 'requires_approval', True),
+        }
+
+        return campaign_info
 
     except HTTPException:
         raise
@@ -231,7 +276,22 @@ async def update_campaign(
 
         logger.info(f"Campaign updated: {campaign.name}")
 
-        return campaign.get_campaign_info()
+        # Простая версия без методов модели
+        campaign_info = {
+            "id": str(campaign.id),
+            "name": campaign.name,
+            "description": campaign.description,
+            "setting": campaign.setting,
+            "status": campaign.status.value if hasattr(campaign.status, 'value') else str(campaign.status),
+            "creator_id": str(campaign.creator_id),
+            "current_players": getattr(campaign, 'current_players', 0),
+            "max_players": campaign.max_players,
+            "starting_level": campaign.starting_level,
+            "is_public": campaign.is_public,
+            "created_at": campaign.created_at.isoformat()
+        }
+
+        return campaign_info
 
     except HTTPException:
         raise
@@ -306,17 +366,26 @@ async def join_campaign(
 
         user_id = str(current_user.id)
 
-        if not campaign.can_join(user_id):
+        # Простая логика присоединения
+        players = getattr(campaign, 'players', []) or []
+        if user_id in players:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Cannot join this campaign"
+                detail="Already in this campaign"
             )
 
-        if not campaign.add_player(user_id):
+        if len(players) >= campaign.max_players:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Failed to join campaign"
+                detail="Campaign is full"
             )
+
+        players.append(user_id)
+        campaign.players = players
+
+        # Обновляем счетчик игроков
+        if hasattr(campaign, 'current_players'):
+            campaign.current_players = len(players)
 
         await db.commit()
 
@@ -354,12 +423,20 @@ async def leave_campaign(
             )
 
         user_id = str(current_user.id)
+        players = getattr(campaign, 'players', []) or []
 
-        if not campaign.remove_player(user_id):
+        if user_id not in players:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="You are not in this campaign"
             )
+
+        players.remove(user_id)
+        campaign.players = players
+
+        # Обновляем счетчик игроков
+        if hasattr(campaign, 'current_players'):
+            campaign.current_players = len(players)
 
         await db.commit()
 

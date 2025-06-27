@@ -76,7 +76,7 @@ class Settings(BaseSettings):
     ALLOWED_IMAGE_TYPES: list = ["image/jpeg", "image/png", "image/webp"]
 
     # CORS
-    ALLOWED_ORIGINS: list = ["http://localhost:3000", "http://127.0.0.1:3000"]
+    ALLOWED_ORIGINS: list = ["http://localhost:3000", "http://127.0.0.1:3000", "http://192.168.4.55:3000", "http://0.0.0.0:3000"]
 
     # Логирование
     LOG_LEVEL: str = Field(default="INFO", env="LOG_LEVEL")
