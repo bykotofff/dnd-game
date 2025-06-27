@@ -1,20 +1,17 @@
 import React, { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from 'react-query';
 import { useForm } from 'react-hook-form';
-import { useMutation, useQuery, useQueryClient } from 'react-query';
 import { toast } from 'react-hot-toast';
 import { motion } from 'framer-motion';
 import {
-    UserCircleIcon,
+    UserIcon,
     PencilIcon,
-    EyeIcon,
-    EyeSlashIcon,
-    KeyIcon,
-    SaveIcon,
+    CheckIcon, // Исправлено: используем CheckIcon вместо SaveIcon
     CameraIcon,
-    TrashIcon,
-    CheckIcon,
-    XMarkIcon,
-    Cog6ToothIcon
+    ClockIcon,
+    TrophyIcon,
+    FireIcon,
+    UserGroupIcon,
 } from '@heroicons/react/24/outline';
 
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
@@ -22,67 +19,73 @@ import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import LoadingScreen from '@/components/ui/LoadingScreen';
 import { useAuth } from '@/store/authStore';
-import { userService } from '@/services/userService';
-import type { User } from '@/types';
+import { apiService } from '@/services/api';
+import { formatDate } from '@/utils';
 
 interface ProfileFormData {
     display_name: string;
-    email: string;
     bio: string;
+    avatar_url?: string;
 }
 
-interface PasswordFormData {
-    old_password: string;
-    new_password: string;
-    confirm_password: string;
-}
-
-interface PreferencesFormData {
-    theme: 'light' | 'dark' | 'auto';
-    sound_enabled: boolean;
-    notifications_enabled: boolean;
-    auto_roll_damage: boolean;
-    show_advanced_options: boolean;
+interface UserProfile {
+    id: string;
+    username: string;
+    email: string;
+    display_name?: string;
+    bio?: string;
+    avatar_url?: string;
+    games_played: number;
+    total_playtime: number;
+    is_verified: boolean;
+    created_at: string;
+    last_login?: string;
+    last_seen?: string;
 }
 
 const ProfilePage: React.FC = () => {
-    const { user, refreshUser } = useAuth();
+    const { user } = useAuth();
     const queryClient = useQueryClient();
-    const [activeTab, setActiveTab] = useState('profile');
-    const [showPasswordChange, setShowPasswordChange] = useState(false);
-    const [showCurrentPassword, setShowCurrentPassword] = useState(false);
-    const [showNewPassword, setShowNewPassword] = useState(false);
+    const [isEditing, setIsEditing] = useState(false);
 
-    // Profile form
-    const profileForm = useForm<ProfileFormData>({
+    // Получение полного профиля
+    const { data: profile, isLoading, error } = useQuery<UserProfile>(
+        ['profile'],
+        () => apiService.get('/api/users/me'),
+        {
+            staleTime: 5 * 60 * 1000, // 5 минут
+        }
+    );
+
+    // Форма для редактирования
+    const { register, handleSubmit, reset, formState: { isDirty, isSubmitting } } = useForm<ProfileFormData>({
         defaultValues: {
-            display_name: user?.display_name || '',
-            email: user?.email || '',
-            bio: user?.bio || '',
+            display_name: profile?.display_name || '',
+            bio: profile?.bio || '',
+            avatar_url: profile?.avatar_url || '',
         },
     });
 
-    // Password form
-    const passwordForm = useForm<PasswordFormData>();
+    // Обновление профиля после получения данных
+    React.useEffect(() => {
+        if (profile) {
+            reset({
+                display_name: profile.display_name || '',
+                bio: profile.bio || '',
+                avatar_url: profile.avatar_url || '',
+            });
+        }
+    }, [profile, reset]);
 
-    // Preferences form
-    const preferencesForm = useForm<PreferencesFormData>({
-        defaultValues: {
-            theme: user?.preferences?.theme || 'auto',
-            sound_enabled: user?.preferences?.sound_enabled ?? true,
-            notifications_enabled: user?.preferences?.notifications_enabled ?? true,
-            auto_roll_damage: user?.preferences?.auto_roll_damage ?? false,
-            show_advanced_options: user?.preferences?.show_advanced_options ?? false,
-        },
-    });
-
-    // Update profile mutation
+    // Мутация для обновления профиля
     const updateProfileMutation = useMutation(
-        (data: ProfileFormData) => userService.updateProfile(data),
+        (data: ProfileFormData) => apiService.put('/api/users/me', data),
         {
             onSuccess: () => {
+                queryClient.invalidateQueries(['profile']);
+                queryClient.invalidateQueries(['auth']);
                 toast.success('Профиль обновлен!');
-                refreshUser();
+                setIsEditing(false);
             },
             onError: () => {
                 toast.error('Ошибка при обновлении профиля');
@@ -90,178 +93,98 @@ const ProfilePage: React.FC = () => {
         }
     );
 
-    // Change password mutation
-    const changePasswordMutation = useMutation(
-        (data: PasswordFormData) => userService.changePassword(data.old_password, data.new_password),
-        {
-            onSuccess: () => {
-                toast.success('Пароль изменен!');
-                passwordForm.reset();
-                setShowPasswordChange(false);
-            },
-            onError: (error: any) => {
-                toast.error(error.response?.data?.detail || 'Ошибка при изменении пароля');
-            },
-        }
-    );
-
-    // Update preferences mutation
-    const updatePreferencesMutation = useMutation(
-        (data: PreferencesFormData) => userService.updatePreferences(data),
-        {
-            onSuccess: () => {
-                toast.success('Настройки сохранены!');
-                refreshUser();
-            },
-            onError: () => {
-                toast.error('Ошибка при сохранении настроек');
-            },
-        }
-    );
-
-    const onProfileSubmit = (data: ProfileFormData) => {
+    const onSubmit = (data: ProfileFormData) => {
         updateProfileMutation.mutate(data);
     };
 
-    const onPasswordSubmit = (data: PasswordFormData) => {
-        if (data.new_password !== data.confirm_password) {
-            toast.error('Пароли не совпадают');
-            return;
-        }
-        changePasswordMutation.mutate(data);
+    const handleCancel = () => {
+        reset();
+        setIsEditing(false);
     };
 
-    const onPreferencesSubmit = (data: PreferencesFormData) => {
-        updatePreferencesMutation.mutate(data);
-    };
-
-    if (!user) {
+    if (isLoading) {
         return <LoadingScreen message="Загрузка профиля..." />;
     }
 
-    const tabs = [
-        { id: 'profile', name: 'Профиль', icon: UserCircleIcon },
-        { id: 'security', name: 'Безопасность', icon: KeyIcon },
-        { id: 'preferences', name: 'Настройки', icon: Cog6ToothIcon },
+    if (error || !profile) {
+        return (
+            <div className="text-center py-16">
+                <div className="text-red-500 text-lg mb-4">Ошибка загрузки профиля</div>
+                <Button variant="outline" onClick={() => window.location.reload()}>
+                    Попробовать снова
+                </Button>
+            </div>
+        );
+    }
+
+    const stats = [
+        {
+            name: 'Игр сыграно',
+            value: profile.games_played || 0,
+            icon: TrophyIcon,
+            color: 'text-yellow-600',
+            bgColor: 'bg-yellow-100 dark:bg-yellow-900',
+        },
+        {
+            name: 'Время в игре',
+            value: `${Math.round((profile.total_playtime || 0) / 60)}ч`,
+            icon: ClockIcon,
+            color: 'text-blue-600',
+            bgColor: 'bg-blue-100 dark:bg-blue-900',
+        },
+        {
+            name: 'Активных персонажей',
+            value: 3, // TODO: Получать из API
+            icon: UserGroupIcon,
+            color: 'text-green-600',
+            bgColor: 'bg-green-100 dark:bg-green-900',
+        },
+        {
+            name: 'Уровень активности',
+            value: 'Высокий',
+            icon: FireIcon,
+            color: 'text-red-600',
+            bgColor: 'bg-red-100 dark:bg-red-900',
+        },
     ];
 
     return (
-        <div className="max-w-4xl mx-auto space-y-6">
+        <div className="space-y-8">
             {/* Header */}
-            <div className="text-center">
-                <h1 className="text-3xl font-fantasy font-bold text-gray-900 dark:text-white">
-                    Профиль пользователя
-                </h1>
-                <p className="text-gray-600 dark:text-gray-400 mt-2">
-                    Управление аккаунтом и настройками
-                </p>
+            <div className="flex items-center justify-between">
+                <div>
+                    <h1 className="text-3xl font-fantasy font-bold text-gray-900 dark:text-white">
+                        Мой профиль
+                    </h1>
+                    <p className="text-gray-600 dark:text-gray-400 mt-2">
+                        Управляйте своей учетной записью и настройками
+                    </p>
+                </div>
+                {!isEditing && (
+                    <Button variant="default" onClick={() => setIsEditing(true)}>
+                        <PencilIcon className="h-5 w-5 mr-2" />
+                        Редактировать
+                    </Button>
+                )}
             </div>
 
-            {/* User Info Card */}
-            <Card variant="character">
-                <CardContent className="p-6">
-                    <div className="flex items-center space-x-6">
-                        {/* Avatar */}
-                        <div className="relative">
-                            {user.avatar_url ? (
-                                <img
-                                    src={user.avatar_url}
-                                    alt={user.display_name || user.username}
-                                    className="w-24 h-24 rounded-full object-cover border-4 border-primary-200 dark:border-primary-700"
-                                />
-                            ) : (
-                                <div className="w-24 h-24 bg-primary-100 dark:bg-primary-800 rounded-full flex items-center justify-center border-4 border-primary-200 dark:border-primary-700">
-                                    <UserCircleIcon className="w-16 h-16 text-primary-600 dark:text-primary-400" />
-                                </div>
-                            )}
-                            <button className="absolute bottom-0 right-0 bg-white dark:bg-gray-800 rounded-full p-2 shadow-lg border-2 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
-                                <CameraIcon className="w-4 h-4 text-gray-600 dark:text-gray-400" />
-                            </button>
-                        </div>
-
-                        {/* User Info */}
-                        <div className="flex-1">
-                            <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
-                                {user.display_name || user.username}
-                            </h2>
-                            <p className="text-gray-600 dark:text-gray-400">@{user.username}</p>
-                            <p className="text-sm text-gray-500 dark:text-gray-500 mt-1">{user.email}</p>
-
-                            <div className="flex items-center space-x-4 mt-3">
-                                <div className="flex items-center space-x-1">
-                                    <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                                        Игр сыграно:
-                                    </span>
-                                    <span className="text-sm font-bold text-primary-600 dark:text-primary-400">
-                                        {user.games_played}
-                                    </span>
-                                </div>
-                                <div className="flex items-center space-x-1">
-                                    <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                                        Время в игре:
-                                    </span>
-                                    <span className="text-sm font-bold text-primary-600 dark:text-primary-400">
-                                        {Math.round(user.total_playtime / 60)}ч
-                                    </span>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </CardContent>
-            </Card>
-
-            {/* Tabs */}
-            <Card>
-                <CardContent className="p-0">
-                    <div className="border-b border-gray-200 dark:border-gray-700">
-                        <nav className="flex space-x-8 px-6">
-                            {tabs.map((tab) => {
-                                const Icon = tab.icon;
-                                return (
-                                    <button
-                                        key={tab.id}
-                                        onClick={() => setActiveTab(tab.id)}
-                                        className={`flex items-center space-x-2 py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
-                                            activeTab === tab.id
-                                                ? 'border-primary-500 text-primary-600 dark:text-primary-400'
-                                                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300'
-                                        }`}
-                                    >
-                                        <Icon className="w-5 h-5" />
-                                        <span>{tab.name}</span>
-                                    </button>
-                                );
-                            })}
-                        </nav>
-                    </div>
-
-                    <div className="p-6">
-                        <motion.div
-                            key={activeTab}
-                            initial={{ opacity: 0, y: 10 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            transition={{ duration: 0.2 }}
-                        >
-                            {/* Profile Tab */}
-                            {activeTab === 'profile' && (
-                                <form onSubmit={profileForm.handleSubmit(onProfileSubmit)} className="space-y-6">
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                {/* Основная информация */}
+                <div className="lg:col-span-2 space-y-6">
+                    <Card>
+                        <CardHeader>
+                            <CardTitle>Основная информация</CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                            {isEditing ? (
+                                <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                            Отображаемое имя
+                                        </label>
                                         <Input
-                                            label="Отображаемое имя"
-                                            {...profileForm.register('display_name')}
-                                            error={profileForm.formState.errors.display_name?.message}
-                                        />
-                                        <Input
-                                            label="Email"
-                                            type="email"
-                                            {...profileForm.register('email', {
-                                                required: 'Email обязателен',
-                                                pattern: {
-                                                    value: /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i,
-                                                    message: 'Некорректный email',
-                                                },
-                                            })}
-                                            error={profileForm.formState.errors.email?.message}
+                                            {...register('display_name')}
+                                            placeholder="Как вас зовут?"
                                         />
                                     </div>
 
@@ -270,217 +193,193 @@ const ProfilePage: React.FC = () => {
                                             О себе
                                         </label>
                                         <textarea
-                                            {...profileForm.register('bio')}
+                                            {...register('bio')}
                                             rows={4}
-                                            className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-primary-500 focus:border-primary-500"
+                                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                                             placeholder="Расскажите о себе..."
                                         />
                                     </div>
 
-                                    <div className="flex justify-end">
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                            URL аватара
+                                        </label>
+                                        <Input
+                                            {...register('avatar_url')}
+                                            placeholder="https://..."
+                                        />
+                                    </div>
+
+                                    <div className="flex space-x-3">
+                                        <Button
+                                            type="button"
+                                            variant="outline"
+                                            onClick={handleCancel}
+                                        >
+                                            Отмена
+                                        </Button>
                                         <Button
                                             type="submit"
-                                            loading={updateProfileMutation.isLoading}
-                                            disabled={!profileForm.formState.isDirty}
+                                            variant="fantasy"
+                                            loading={isSubmitting}
+                                            disabled={!isDirty}
                                         >
-                                            <SaveIcon className="w-4 h-4 mr-2" />
-                                            Сохранить изменения
+                                            <CheckIcon className="h-5 w-5 mr-2" />
+                                            Сохранить
                                         </Button>
                                     </div>
                                 </form>
-                            )}
-
-                            {/* Security Tab */}
-                            {activeTab === 'security' && (
+                            ) : (
                                 <div className="space-y-6">
-                                    <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
-                                        <h3 className="text-lg font-medium text-blue-900 dark:text-blue-100 mb-2">
-                                            Безопасность аккаунта
-                                        </h3>
-                                        <p className="text-sm text-blue-700 dark:text-blue-300 mb-4">
-                                            Регулярно меняйте пароль для защиты вашего аккаунта.
-                                        </p>
-
-                                        {!showPasswordChange ? (
-                                            <Button
-                                                variant="outline"
-                                                onClick={() => setShowPasswordChange(true)}
-                                            >
-                                                <KeyIcon className="w-4 h-4 mr-2" />
-                                                Сменить пароль
-                                            </Button>
-                                        ) : (
-                                            <form onSubmit={passwordForm.handleSubmit(onPasswordSubmit)} className="space-y-4">
-                                                <Input
-                                                    label="Текущий пароль"
-                                                    type={showCurrentPassword ? 'text' : 'password'}
-                                                    {...passwordForm.register('old_password', {
-                                                        required: 'Введите текущий пароль',
-                                                    })}
-                                                    error={passwordForm.formState.errors.old_password?.message}
-                                                    rightIcon={
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => setShowCurrentPassword(!showCurrentPassword)}
-                                                            className="text-gray-400 hover:text-gray-600"
-                                                        >
-                                                            {showCurrentPassword ? (
-                                                                <EyeSlashIcon className="w-5 h-5" />
-                                                            ) : (
-                                                                <EyeIcon className="w-5 h-5" />
-                                                            )}
-                                                        </button>
-                                                    }
+                                    <div className="flex items-start space-x-6">
+                                        {/* Аватар */}
+                                        <div className="flex-shrink-0">
+                                            {profile.avatar_url ? (
+                                                <img
+                                                    src={profile.avatar_url}
+                                                    alt={profile.display_name || profile.username}
+                                                    className="w-20 h-20 rounded-full object-cover border-2 border-primary-200 dark:border-primary-700"
                                                 />
-
-                                                <Input
-                                                    label="Новый пароль"
-                                                    type={showNewPassword ? 'text' : 'password'}
-                                                    {...passwordForm.register('new_password', {
-                                                        required: 'Введите новый пароль',
-                                                        minLength: {
-                                                            value: 8,
-                                                            message: 'Пароль должен содержать минимум 8 символов',
-                                                        },
-                                                    })}
-                                                    error={passwordForm.formState.errors.new_password?.message}
-                                                    rightIcon={
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => setShowNewPassword(!showNewPassword)}
-                                                            className="text-gray-400 hover:text-gray-600"
-                                                        >
-                                                            {showNewPassword ? (
-                                                                <EyeSlashIcon className="w-5 h-5" />
-                                                            ) : (
-                                                                <EyeIcon className="w-5 h-5" />
-                                                            )}
-                                                        </button>
-                                                    }
-                                                />
-
-                                                <Input
-                                                    label="Подтвердите новый пароль"
-                                                    type="password"
-                                                    {...passwordForm.register('confirm_password', {
-                                                        required: 'Подтвердите новый пароль',
-                                                    })}
-                                                    error={passwordForm.formState.errors.confirm_password?.message}
-                                                />
-
-                                                <div className="flex space-x-3">
-                                                    <Button
-                                                        type="submit"
-                                                        loading={changePasswordMutation.isLoading}
-                                                    >
-                                                        <CheckIcon className="w-4 h-4 mr-2" />
-                                                        Сменить пароль
-                                                    </Button>
-                                                    <Button
-                                                        type="button"
-                                                        variant="outline"
-                                                        onClick={() => {
-                                                            setShowPasswordChange(false);
-                                                            passwordForm.reset();
-                                                        }}
-                                                    >
-                                                        <XMarkIcon className="w-4 h-4 mr-2" />
-                                                        Отмена
-                                                    </Button>
+                                            ) : (
+                                                <div className="w-20 h-20 bg-gradient-to-br from-primary-100 to-primary-200 dark:from-primary-800 dark:to-primary-900 rounded-full flex items-center justify-center border-2 border-primary-200 dark:border-primary-700">
+                                                    <UserIcon className="w-10 h-10 text-primary-400 dark:text-primary-500" />
                                                 </div>
-                                            </form>
-                                        )}
+                                            )}
+                                        </div>
+
+                                        {/* Информация */}
+                                        <div className="flex-1 space-y-4">
+                                            <div>
+                                                <label className="text-sm font-medium text-gray-500 dark:text-gray-400">
+                                                    Отображаемое имя
+                                                </label>
+                                                <p className="text-lg font-semibold text-gray-900 dark:text-white">
+                                                    {profile.display_name || 'Не указано'}
+                                                </p>
+                                            </div>
+
+                                            <div>
+                                                <label className="text-sm font-medium text-gray-500 dark:text-gray-400">
+                                                    Имя пользователя
+                                                </label>
+                                                <p className="text-lg font-semibold text-gray-900 dark:text-white">
+                                                    {profile.username}
+                                                </p>
+                                            </div>
+
+                                            <div>
+                                                <label className="text-sm font-medium text-gray-500 dark:text-gray-400">
+                                                    Email
+                                                </label>
+                                                <p className="text-lg font-semibold text-gray-900 dark:text-white">
+                                                    {profile.email}
+                                                    {profile.is_verified ? (
+                                                        <span className="ml-2 inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
+                                                            Подтвержден
+                                                        </span>
+                                                    ) : (
+                                                        <span className="ml-2 inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200">
+                                                            Не подтвержден
+                                                        </span>
+                                                    )}
+                                                </p>
+                                            </div>
+
+                                            {profile.bio && (
+                                                <div>
+                                                    <label className="text-sm font-medium text-gray-500 dark:text-gray-400">
+                                                        О себе
+                                                    </label>
+                                                    <p className="text-gray-900 dark:text-white">
+                                                        {profile.bio}
+                                                    </p>
+                                                </div>
+                                            )}
+                                        </div>
                                     </div>
                                 </div>
                             )}
+                        </CardContent>
+                    </Card>
 
-                            {/* Preferences Tab */}
-                            {activeTab === 'preferences' && (
-                                <form onSubmit={preferencesForm.handleSubmit(onPreferencesSubmit)} className="space-y-6">
-                                    <div className="space-y-4">
-                                        <h3 className="text-lg font-medium text-gray-900 dark:text-white">
-                                            Настройки интерфейса
-                                        </h3>
+                    {/* Информация об активности */}
+                    <Card>
+                        <CardHeader>
+                            <CardTitle>Активность</CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                            <div className="space-y-4">
+                                <div>
+                                    <label className="text-sm font-medium text-gray-500 dark:text-gray-400">
+                                        Дата регистрации
+                                    </label>
+                                    <p className="text-gray-900 dark:text-white">
+                                        {formatDate(profile.created_at)}
+                                    </p>
+                                </div>
 
-                                        {/* Theme */}
-                                        <div>
-                                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                                                Тема оформления
-                                            </label>
-                                            <select
-                                                {...preferencesForm.register('theme')}
-                                                className="w-full p-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
-                                            >
-                                                <option value="auto">Системная</option>
-                                                <option value="light">Светлая</option>
-                                                <option value="dark">Темная</option>
-                                            </select>
-                                        </div>
-
-                                        {/* Checkboxes */}
-                                        <div className="space-y-3">
-                                            <label className="flex items-center">
-                                                <input
-                                                    type="checkbox"
-                                                    {...preferencesForm.register('sound_enabled')}
-                                                    className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-                                                />
-                                                <span className="ml-2 text-sm text-gray-700 dark:text-gray-300">
-                                                    Звуковые эффекты
-                                                </span>
-                                            </label>
-
-                                            <label className="flex items-center">
-                                                <input
-                                                    type="checkbox"
-                                                    {...preferencesForm.register('notifications_enabled')}
-                                                    className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-                                                />
-                                                <span className="ml-2 text-sm text-gray-700 dark:text-gray-300">
-                                                    Уведомления
-                                                </span>
-                                            </label>
-
-                                            <label className="flex items-center">
-                                                <input
-                                                    type="checkbox"
-                                                    {...preferencesForm.register('auto_roll_damage')}
-                                                    className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-                                                />
-                                                <span className="ml-2 text-sm text-gray-700 dark:text-gray-300">
-                                                    Автоматически бросать урон
-                                                </span>
-                                            </label>
-
-                                            <label className="flex items-center">
-                                                <input
-                                                    type="checkbox"
-                                                    {...preferencesForm.register('show_advanced_options')}
-                                                    className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-                                                />
-                                                <span className="ml-2 text-sm text-gray-700 dark:text-gray-300">
-                                                    Показывать расширенные настройки
-                                                </span>
-                                            </label>
-                                        </div>
+                                {profile.last_login && (
+                                    <div>
+                                        <label className="text-sm font-medium text-gray-500 dark:text-gray-400">
+                                            Последний вход
+                                        </label>
+                                        <p className="text-gray-900 dark:text-white">
+                                            {formatDate(profile.last_login)}
+                                        </p>
                                     </div>
+                                )}
 
-                                    <div className="flex justify-end">
-                                        <Button
-                                            type="submit"
-                                            loading={updatePreferencesMutation.isLoading}
-                                            disabled={!preferencesForm.formState.isDirty}
+                                {profile.last_seen && (
+                                    <div>
+                                        <label className="text-sm font-medium text-gray-500 dark:text-gray-400">
+                                            Последняя активность
+                                        </label>
+                                        <p className="text-gray-900 dark:text-white">
+                                            {formatDate(profile.last_seen)}
+                                        </p>
+                                    </div>
+                                )}
+                            </div>
+                        </CardContent>
+                    </Card>
+                </div>
+
+                {/* Статистика */}
+                <div className="space-y-6">
+                    <Card>
+                        <CardHeader>
+                            <CardTitle>Статистика игр</CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                            <div className="space-y-4">
+                                {stats.map((stat) => {
+                                    const Icon = stat.icon;
+                                    return (
+                                        <motion.div
+                                            key={stat.name}
+                                            initial={{ opacity: 0, x: 20 }}
+                                            animate={{ opacity: 1, x: 0 }}
+                                            className="flex items-center space-x-3"
                                         >
-                                            <SaveIcon className="w-4 h-4 mr-2" />
-                                            Сохранить настройки
-                                        </Button>
-                                    </div>
-                                </form>
-                            )}
-                        </motion.div>
-                    </div>
-                </CardContent>
-            </Card>
+                                            <div className={`p-2 rounded-lg ${stat.bgColor}`}>
+                                                <Icon className={`h-5 w-5 ${stat.color}`} />
+                                            </div>
+                                            <div className="flex-1">
+                                                <p className="text-sm font-medium text-gray-500 dark:text-gray-400">
+                                                    {stat.name}
+                                                </p>
+                                                <p className="text-lg font-bold text-gray-900 dark:text-white">
+                                                    {stat.value}
+                                                </p>
+                                            </div>
+                                        </motion.div>
+                                    );
+                                })}
+                            </div>
+                        </CardContent>
+                    </Card>
+                </div>
+            </div>
         </div>
     );
 };

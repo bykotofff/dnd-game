@@ -6,7 +6,7 @@ import {
     PencilIcon,
     CubeIcon,
     ShieldCheckIcon,
-    SwordIcon,
+    WrenchScrewdriverIcon,
     SparklesIcon,
     CurrencyDollarIcon,
 } from '@heroicons/react/24/outline';
@@ -55,7 +55,7 @@ const InventoryManager: React.FC<InventoryManagerProps> = ({
     const inventory = character.inventory;
 
     const itemTypes = [
-        { id: 'weapon', name: 'Оружие', icon: SwordIcon },
+        { id: 'weapon', name: 'Оружие', icon: WrenchScrewdriverIcon },
         { id: 'armor', name: 'Броня', icon: ShieldCheckIcon },
         { id: 'shield', name: 'Щит', icon: ShieldCheckIcon },
         { id: 'consumable', name: 'Расходники', icon: SparklesIcon },

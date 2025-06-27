@@ -2,7 +2,7 @@ import React from 'react';
 import { motion } from 'framer-motion';
 import {
     UsersIcon,
-    ShieldIcon,
+    ShieldCheckIcon,
     HeartIcon,
     StarIcon,
     BoltIcon,
@@ -214,7 +214,7 @@ const PlayersPanel: React.FC<PlayersPanelProps> = ({ className = '' }) => {
                                 {/* AC and Level */}
                                 <div className="flex items-center justify-between">
                                     <div className="flex items-center gap-1 text-xs">
-                                        <ShieldIcon className="h-3 w-3 text-blue-500" />
+                                        <ShieldCheckIcon className="h-3 w-3 text-blue-500" />
                                         <span className="text-gray-600 dark:text-gray-400">AC</span>
                                         <span className="font-medium text-blue-600 dark:text-blue-400">
                                             {player.character.armor_class}

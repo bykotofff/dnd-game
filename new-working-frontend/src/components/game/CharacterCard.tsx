@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { motion } from 'framer-motion';
 import {
     HeartIcon,
-    ShieldIcon,
+    ShieldCheckIcon,
     BoltIcon,
     StarIcon,
     EyeIcon,
@@ -194,7 +194,7 @@ const CharacterCard: React.FC<CharacterCardProps> = ({
                         whileHover={{ scale: 1.05 }}
                     >
                         <div className="flex items-center justify-center gap-1 mb-1">
-                            <ShieldIcon className="h-4 w-4 text-blue-500" />
+                            <ShieldCheckIcon className="h-4 w-4 text-blue-500" />
                             <span className="text-xs font-medium text-gray-600 dark:text-gray-400">AC</span>
                         </div>
                         <div className="text-lg font-bold text-blue-600 dark:text-blue-400">
