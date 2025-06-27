@@ -40,6 +40,14 @@ class ImageService:
             "sampler_name": "DPM++ 2M Karras",
         }
 
+    async def close(self):
+        """Закрыть HTTP клиент"""
+        try:
+            await self.client.aclose()
+            logger.info("Image service HTTP client closed")
+        except Exception as e:
+            logger.error(f"Error closing image service client: {e}")
+
     async def health_check(self) -> bool:
         """Проверить доступность Stable Diffusion API"""
         try:

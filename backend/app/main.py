@@ -14,6 +14,7 @@ from app.services.image_service import image_service
 
 # Импорт роутеров
 from app.api import auth, users, characters, games, campaigns, websocket
+from app.api import images  # Добавляем роутер изображений
 
 # Настройка логирования
 logging.basicConfig(
@@ -95,6 +96,7 @@ app.include_router(users.router, prefix="/api/users", tags=["Users"])
 app.include_router(characters.router, prefix="/api/characters", tags=["Characters"])
 app.include_router(campaigns.router, prefix="/api/campaigns", tags=["Campaigns"])
 app.include_router(games.router, prefix="/api/games", tags=["Games"])
+app.include_router(images.router, prefix="/api/images", tags=["Images"])
 app.include_router(websocket.router, prefix="/api/ws", tags=["WebSocket"])
 
 
@@ -160,6 +162,7 @@ async def get_api_info():
             "characters": "/api/characters",
             "campaigns": "/api/campaigns",
             "games": "/api/games",
+            "images": "/api/images",
             "websocket": "/api/ws"
         }
     }
