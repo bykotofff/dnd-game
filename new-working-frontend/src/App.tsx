@@ -4,17 +4,30 @@ import { QueryClient, QueryClientProvider } from 'react-query';
 import { Toaster } from 'react-hot-toast';
 import { useAuthStore } from '@/store/authStore';
 
-// Pages
+// Auth Pages
 import LoginPage from '@/pages/auth/LoginPage';
 import RegisterPage from '@/pages/auth/RegisterPage';
+
+// Main Pages
 import DashboardPage from '@/pages/dashboard/DashboardPage';
+import ProfilePage from '@/pages/profile/ProfilePage';
+
+// Character Pages
 import CharactersPage from '@/pages/characters/CharactersPage';
 import CharacterCreatePage from '@/pages/characters/CharacterCreatePage';
 import CharacterViewPage from '@/pages/characters/CharacterViewPage';
-import CharacterEditPage from '@/pages/characters/CharacterEditPage'; // Этот импорт отсутствовал!
+import CharacterEditPage from '@/pages/characters/CharacterEditPage';
+
+// Campaign Pages
 import CampaignsPage from '@/pages/campaigns/CampaignsPage';
+import CreateCampaignPage from '@/pages/campaigns/CreateCampaignPage';
+import CampaignDetailPage from '@/pages/campaigns/CampaignDetailPage';
+
+// Game Pages
 import GamePage from '@/pages/game/GamePage';
-import ProfilePage from '@/pages/profile/ProfilePage';
+
+// Tool Pages
+import PortraitGeneratorPage from '@/pages/tools/PortraitGeneratorPage';
 
 // Components
 import Layout from '@/components/layout/Layout';
@@ -49,16 +62,6 @@ function App() {
             <Router>
                 <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
                     <Routes>
-                        {/* Root route - redirect based on auth status */}
-                        <Route
-                            path="/"
-                            element={
-                                isAuthenticated ?
-                                    <Navigate to="/dashboard" replace /> :
-                                    <Navigate to="/login" replace />
-                            }
-                        />
-
                         {/* Public routes */}
                         <Route
                             path="/login"
@@ -73,85 +76,37 @@ function App() {
                             }
                         />
 
-                        {/* Protected routes with Layout */}
+                        {/* Protected routes */}
                         <Route
-                            path="/dashboard"
+                            path="/"
                             element={
                                 <ProtectedRoute>
-                                    <Layout>
-                                        <DashboardPage />
-                                    </Layout>
+                                    <Layout />
                                 </ProtectedRoute>
                             }
-                        />
+                        >
+                            <Route index element={<Navigate to="/dashboard" replace />} />
+                            <Route path="dashboard" element={<DashboardPage />} />
 
-                        <Route
-                            path="/characters"
-                            element={
-                                <ProtectedRoute>
-                                    <Layout>
-                                        <CharactersPage />
-                                    </Layout>
-                                </ProtectedRoute>
-                            }
-                        />
+                            {/* Characters */}
+                            <Route path="characters" element={<CharactersPage />} />
+                            <Route path="characters/create" element={<CharacterCreatePage />} />
+                            <Route path="characters/:id" element={<CharacterViewPage />} />
+                            <Route path="characters/:id/edit" element={<CharacterEditPage />} />
 
-                        <Route
-                            path="/characters/create"
-                            element={
-                                <ProtectedRoute>
-                                    <Layout>
-                                        <CharacterCreatePage />
-                                    </Layout>
-                                </ProtectedRoute>
-                            }
-                        />
+                            {/* Campaigns */}
+                            <Route path="campaigns" element={<CampaignsPage />} />
+                            <Route path="campaigns/create" element={<CreateCampaignPage />} />
+                            <Route path="campaigns/:id" element={<CampaignDetailPage />} />
 
-                        <Route
-                            path="/characters/:id"
-                            element={
-                                <ProtectedRoute>
-                                    <Layout>
-                                        <CharacterViewPage />
-                                    </Layout>
-                                </ProtectedRoute>
-                            }
-                        />
+                            {/* Tools */}
+                            <Route path="tools/portrait-generator" element={<PortraitGeneratorPage />} />
 
-                        <Route
-                            path="/characters/:id/edit"
-                            element={
-                                <ProtectedRoute>
-                                    <Layout>
-                                        <CharacterEditPage />
-                                    </Layout>
-                                </ProtectedRoute>
-                            }
-                        />
+                            {/* Profile */}
+                            <Route path="profile" element={<ProfilePage />} />
+                        </Route>
 
-                        <Route
-                            path="/campaigns"
-                            element={
-                                <ProtectedRoute>
-                                    <Layout>
-                                        <CampaignsPage />
-                                    </Layout>
-                                </ProtectedRoute>
-                            }
-                        />
-
-                        <Route
-                            path="/profile"
-                            element={
-                                <ProtectedRoute>
-                                    <Layout>
-                                        <ProfilePage />
-                                    </Layout>
-                                </ProtectedRoute>
-                            }
-                        />
-
-                        {/* Game route (full screen, no layout) */}
+                        {/* Game route (full screen) */}
                         <Route
                             path="/game/:gameId"
                             element={
@@ -162,31 +117,29 @@ function App() {
                         />
 
                         {/* Catch all route */}
-                        <Route path="*" element={<Navigate to="/" replace />} />
+                        <Route path="*" element={<Navigate to="/dashboard" replace />} />
                     </Routes>
 
                     {/* Global toast notifications */}
                     <Toaster
                         position="top-right"
                         toastOptions={{
-                            duration: 4000,
+                            duration: 3000,
                             style: {
-                                background: '#fff',
-                                color: '#374151',
-                                border: '1px solid #e5e7eb',
-                                borderRadius: '0.5rem',
-                                fontSize: '0.875rem',
+                                background: 'var(--background)',
+                                color: 'var(--foreground)',
+                                border: '1px solid var(--border)',
                             },
                             success: {
                                 iconTheme: {
                                     primary: '#10b981',
-                                    secondary: '#fff',
+                                    secondary: '#ffffff',
                                 },
                             },
                             error: {
                                 iconTheme: {
                                     primary: '#ef4444',
-                                    secondary: '#fff',
+                                    secondary: '#ffffff',
                                 },
                             },
                         }}

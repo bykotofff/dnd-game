@@ -1,5 +1,6 @@
+# backend/app/core/database.py (ИСПРАВЛЕННАЯ ВЕРСИЯ)
+
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
-from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy import MetaData
 from typing import AsyncGenerator
 import asyncio
@@ -9,8 +10,8 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-# Создаем базовый класс для моделей
-Base = declarative_base()
+# Импортируем Base из models/base.py вместо создания нового
+from app.models.base import Base
 
 # Метаданные для миграций
 metadata = MetaData()
@@ -62,9 +63,12 @@ async def init_db():
             # Импортируем все модели, чтобы они были зарегистрированы
             from app.models import user, character, game, campaign, game_state
 
+            logger.info("Creating database tables...")
+
             # Создаем все таблицы
             await conn.run_sync(Base.metadata.create_all)
             logger.info("Database tables created successfully")
+
     except Exception as e:
         logger.error(f"Error creating database tables: {e}")
         raise
@@ -98,7 +102,7 @@ class DatabaseManager:
         """Проверка здоровья базы данных"""
         try:
             async with self.session_maker() as session:
-                await session.execute("SELECT 1")
+                result = await session.execute("SELECT 1")
                 return True
         except Exception as e:
             logger.error(f"Database health check failed: {e}")
