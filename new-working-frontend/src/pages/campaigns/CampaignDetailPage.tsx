@@ -86,8 +86,9 @@ const CampaignDetailPage: React.FC = () => {
     }
 
     const isCreator = user?.id === campaign.creator_id;
-    const isPlayer = campaign.players.includes(user?.id || '');
-    const canJoin = !isPlayer && !isCreator && campaign.current_players < campaign.max_players;
+    const campaignPlayers = campaign.players || [];
+    const isPlayer = campaignPlayers.includes(user?.id || '');
+    const canJoin = !isPlayer && !isCreator && (campaign.current_players || 0) < campaign.max_players;
 
     const getStatusBadge = (status: string) => {
         const styles = {
