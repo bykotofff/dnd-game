@@ -1,54 +1,13 @@
-// API Response types
-export interface ApiResponse<T> {
-    data?: T;
-    error?: string;
-    message?: string;
-}
+// types/index.ts - Обновленные типы для совместимости
 
-// Auth types
+// User types
 export interface User {
     id: string;
     username: string;
     email: string;
     display_name?: string;
     avatar_url?: string;
-    bio?: string;
-    is_verified: boolean;
-    is_admin: boolean;
-    games_played: number;
-    total_playtime: number;
-    preferences: UserPreferences;
     created_at: string;
-    last_login?: string;
-    last_seen?: string;
-}
-
-export interface UserPreferences {
-    theme: 'light' | 'dark' | 'auto';
-    sound_enabled: boolean;
-    notifications_enabled: boolean;
-    auto_roll_damage: boolean;
-    show_advanced_options: boolean;
-}
-
-export interface AuthTokens {
-    access_token: string;
-    refresh_token: string;
-    token_type: string;
-    user_id: string;
-    username: string;
-}
-
-export interface LoginCredentials {
-    username: string;
-    password: string;
-}
-
-export interface RegisterData {
-    username: string;
-    email: string;
-    password: string;
-    display_name?: string;
 }
 
 // Character types
@@ -57,13 +16,13 @@ export interface Character {
     name: string;
     race: string;
     character_class: string;
-    subclass?: string;
-    background?: string;
-    alignment?: string;
     level: number;
-    experience_points: number;
-
-    // Abilities
+    hit_points: {
+        current: number;
+        max: number;
+        temporary: number;
+    };
+    armor_class: number;
     abilities: {
         strength: number;
         dexterity: number;
@@ -72,131 +31,14 @@ export interface Character {
         wisdom: number;
         charisma: number;
     };
-
-    modifiers: {
-        strength: number;
-        dexterity: number;
-        constitution: number;
-        intelligence: number;
-        wisdom: number;
-        charisma: number;
-    };
-
-    // Combat stats
-    hit_points: {
-        max: number;
-        current: number;
-        temporary: number;
-    };
-
-    armor_class: number;
-    proficiency_bonus: number;
-    speed: number;
-
-    // Skills and proficiencies
-    saving_throws: Record<string, boolean>;
-    skills: Record<string, SkillProficiency>;
-    proficiencies: {
-        armor: string[];
-        weapons: string[];
-        tools: string[];
-        languages: string[];
-    };
-
-    // Equipment and spells
-    inventory: Inventory;
-    spells: SpellsData;
-    features: Feature[];
-    active_effects: Effect[];
-
-    // Roleplay
-    personality: {
-        traits?: string;
-        ideals?: string;
-        bonds?: string;
-        flaws?: string;
-        backstory?: string;
-    };
-
-    appearance?: string;
-    portrait_url?: string;
-    is_alive: boolean;
-    owner_id: string;
-    created_at: string;
+    skills?: Record<string, number>;
+    equipment?: string[];
+    spells?: string[];
+    notes?: string;
+    background?: string;
+    alignment?: string;
+    experience_points?: number;
 }
-
-export interface SkillProficiency {
-    proficient: boolean;
-    expert: boolean;
-}
-
-export interface Inventory {
-    items: Item[];
-    equipment: Record<string, Item>;
-    currency: {
-        cp: number; // copper
-        sp: number; // silver
-        ep: number; // electrum
-        gp: number; // gold
-        pp: number; // platinum
-    };
-}
-
-export interface Item {
-    id: string;
-    name: string;
-    description?: string;
-    type: string;
-    rarity: 'common' | 'uncommon' | 'rare' | 'very_rare' | 'legendary' | 'artifact';
-    magical: boolean;
-    quantity: number;
-    weight: number;
-    value: number; // in gold pieces
-    properties?: string[];
-}
-
-export interface SpellsData {
-    known: Spell[];
-    prepared: string[]; // spell IDs
-    slots: Record<string, { max: number; current: number }>;
-}
-
-export interface Spell {
-    id: string;
-    name: string;
-    level: number;
-    school: string;
-    casting_time: string;
-    range: string;
-    components: string[];
-    duration: string;
-    description: string;
-    damage?: string;
-    save?: string;
-}
-
-export interface Feature {
-    id: string;
-    name: string;
-    description: string;
-    source: string; // class, race, background, etc.
-    uses?: {
-        max: number;
-        current: number;
-        reset_on: 'short_rest' | 'long_rest' | 'dawn' | 'manual';
-    };
-}
-
-export interface Effect {
-    id: string;
-    name: string;
-    description: string;
-    duration: number; // in rounds, -1 for permanent
-    source: string;
-    beneficial: boolean;
-}
-
-// Дополнения к frontend/src/types/index.ts для типов кампаний
 
 // Campaign types
 export interface Campaign {
@@ -270,6 +112,15 @@ export interface Game {
     created_at: string;
 }
 
+// ✅ РАСШИРЕННЫЙ Game интерфейс для совместимости с GameDetailResponse
+export interface GameDetail extends Game {
+    players: string[]; // user IDs
+    settings?: Record<string, any>;
+    current_turn?: string;
+    turn_number?: number;
+    session_start?: string;
+}
+
 // Game session state
 export interface GameSession {
     id: string;
@@ -295,6 +146,7 @@ export interface GameSession {
     };
 }
 
+// ✅ ОБНОВЛЕННЫЙ GamePlayer для совместимости
 export interface GamePlayer {
     user_id: string;
     character_id: string;
@@ -303,8 +155,14 @@ export interface GamePlayer {
     is_online: boolean;
     last_action?: string;
     initiative?: number;
+    current_hp?: number;
+    max_hp?: number;
+    // ✅ Дополнительные поля для полной совместимости
+    character?: Character;
+    isCurrentTurn?: boolean;
 }
 
+// Initiative tracking
 export interface InitiativeEntry {
     character_id: string;
     character_name: string;
@@ -313,18 +171,13 @@ export interface InitiativeEntry {
     is_active: boolean;
 }
 
-// Chat and messaging
-export interface ChatMessage {
-    id: string;
-    game_id: string;
-    sender_id: string;
-    sender_name: string;
-    message_type: 'chat' | 'action' | 'roll' | 'system' | 'ai_dm';
-    content: string;
-    timestamp: string;
-    dice_roll?: DiceRollResult;
-    is_whisper?: boolean;
-    whisper_to?: string[];
+// Dice rolling
+export interface DiceRollData {
+    notation: string;
+    purpose?: string;
+    character_id?: string;
+    advantage?: boolean;
+    disadvantage?: boolean;
 }
 
 export interface DiceRollResult {
@@ -336,182 +189,185 @@ export interface DiceRollResult {
     is_fumble: boolean;
     purpose?: string;
     character_id?: string;
+    advantage?: boolean;
+    disadvantage?: boolean;
 }
 
-// AI DM types
-export interface AiResponse {
+// Chat and messages
+export interface GameMessage {
+    id: string;
+    type: 'chat' | 'action' | 'dice_roll' | 'system' | 'ai_dm' | 'ooc';
+    content: string;
+    sender: string;
+    sender_id?: string;
+    character_id?: string;
+    timestamp: string;
+    dice_roll?: DiceRollResult;
+    is_whisper?: boolean;
+    whisper_to?: string[];
+    // ✅ Дополнительные поля
+    game_id?: string;
+    sender_name?: string;
+    message_type?: string;
+}
+
+// AI Dungeon Master
+export interface AiDmResponse {
     message: string;
-    context_updates?: {
-        scene_description?: string;
-        npc_actions?: string[];
-        world_state_changes?: string[];
-    };
+    scene_description?: string;
     suggested_actions?: string[];
-    requires_player_input: boolean;
+    requires_roll?: {
+        type: string;
+        dc: number;
+        ability: string;
+    };
+    combat_update?: {
+        initiative_order?: string[];
+        current_turn?: string;
+        round_number?: number;
+    };
+}
+
+// Game effects and conditions
+export interface GameEffect {
+    id: string;
+    name: string;
+    description: string;
+    duration: number; // rounds
+    character_id: string;
+    effect_type: 'buff' | 'debuff' | 'condition';
+    modifiers: Record<string, number>;
+}
+
+// Location and environment
+export interface GameLocation {
+    id: string;
+    name: string;
+    description: string;
+    map_url?: string;
+    lighting: 'bright' | 'dim' | 'dark';
+    terrain_type: string;
+    special_rules?: string[];
+}
+
+// Items and inventory
+export interface GameItem {
+    id: string;
+    name: string;
+    description: string;
+    type: 'weapon' | 'armor' | 'consumable' | 'tool' | 'treasure';
+    rarity: 'common' | 'uncommon' | 'rare' | 'very_rare' | 'legendary' | 'artifact';
+    value: number; // in gold pieces
+    weight: number; // in pounds
+    properties?: string[];
+    charges?: number;
+}
+
+// Combat and encounters
+export interface CombatEncounter {
+    id: string;
+    name: string;
+    participants: InitiativeEntry[];
+    current_round: number;
+    current_turn_index: number;
+    environment: GameLocation;
+    special_conditions?: string[];
+    treasure?: GameItem[];
+}
+
+// Game state management
+export interface GameState {
+    session_id: string;
+    current_scene: string;
+    active_players: GamePlayer[];
+    current_turn?: string;
+    turn_number: number;
+    initiative_order: InitiativeEntry[];
+    active_effects: GameEffect[];
+    current_location: GameLocation;
+    party_inventory: GameItem[];
+    ai_context: string[];
+    recent_events: string[];
 }
 
 // WebSocket message types
-export interface WebSocketGameMessage {
-    type: 'chat' | 'action' | 'roll' | 'join' | 'leave' | 'initiative' | 'ai_response' | 'game_state_update';
-    data: any;
-    sender_id?: string;
-    timestamp: string;
-}
-
-// Campaign creation/management forms
-export interface CreateCampaignForm {
-    name: string;
-    description?: string;
-    setting?: string;
-    max_players: number;
-    world_description?: string;
-    main_story?: string;
-    house_rules?: string;
-    starting_level: number;
-    ai_personality?: string;
-    ai_style: 'serious' | 'humorous' | 'dramatic' | 'balanced';
-    is_public: boolean;
-    requires_approval: boolean;
-    settings?: Partial<CampaignSettings>;
-}
-
-export interface JoinCampaignRequest {
-    character_id: string;
-    message?: string; // optional message to DM if approval required
-}
-
-// Campaign list filters
-export interface CampaignFilters {
-    status?: 'planning' | 'active' | 'waiting' | 'on_hold' | 'completed' | 'archived';
-    public_only?: boolean;
-    my_campaigns?: boolean;
-    max_players?: number;
-    starting_level_min?: number;
-    starting_level_max?: number;
-    setting?: string;
-    search_query?: string;
-}
-
-// Campaign statistics
-export interface CampaignStats {
-    total_sessions: number;
-    total_playtime: number; // in minutes
-    average_session_length: number;
-    most_active_player: string;
-    character_deaths: number;
-    major_events: number;
-    ai_responses_count: number;
-}
-
-export * from './character';
-export * from './auth';
-export * from './ui';
-
-// Game types
-export interface Game {
-    id: string;
-    name: string;
-    description?: string;
-    status: 'waiting' | 'active' | 'paused' | 'completed' | 'cancelled';
-    campaign_id: string;
-
-    players: {
-        current: number;
-        max: number;
-        list: string[];
-    };
-
-    characters: string[];
-    current_scene?: string;
-
-    turn_info: {
-        turn: number;
-        current_player_index: number;
-        current_player_id?: string;
-    };
-
-    settings: GameSettings;
-
-    statistics: {
-        session_duration: number;
-        messages_count: number;
-        dice_rolls_count: number;
-    };
-
-    created_at: string;
-    updated_at: string;
-}
-
-export interface GameSettings {
-    dice_rolling: 'manual' | 'auto' | 'dm_only';
-    character_sheets_visible: boolean;
-    allow_pvp: boolean;
-    death_saves: boolean;
-    milestone_leveling: boolean;
-}
-
-// Message types for WebSocket
-export interface GameMessage {
-    id: string;
-    game_id: string;
-    sender: {
-        id?: string;
-        type: 'player' | 'dm' | 'system' | 'ai';
-        name?: string;
-    };
-    message_type: 'text' | 'action' | 'dice_roll' | 'system';
-    content: string;
-    character_id?: string;
-    is_ooc: boolean; // out of character
-    is_whisper: boolean;
-    whisper_target?: string;
-    dice_data?: DiceRollData;
-    timestamp: string;
-}
-
-export interface DiceRollData {
-    notation: string;
-    result: number;
-    individual_rolls: number[];
-    modifiers: Record<string, number>;
-    purpose?: string;
-    is_critical: boolean;
-    is_advantage: boolean;
-    is_disadvantage: boolean;
-}
-
 export interface WebSocketMessage {
-    type: string;
+    type: 'connected' | 'player_joined' | 'player_left' | 'chat_message' |
+        'dice_roll' | 'game_state_update' | 'initiative_update' | 'error';
     data: any;
     timestamp: string;
 }
 
-// Dice types
-export interface DiceRoll {
-    notation: string;
-    result: number;
-    individual_rolls: number[];
-    modifiers: Record<string, number>;
-    purpose?: string;
-    advantage?: boolean;
-    disadvantage?: boolean;
-    critical?: boolean;
+// API response wrappers
+export interface ApiResponse<T> {
+    success: boolean;
+    data: T;
+    message?: string;
+    error?: string;
 }
 
-// UI State types
-export interface UIState {
-    theme: 'light' | 'dark';
-    sidebarOpen: boolean;
-    loading: boolean;
-    error: string | null;
-    notifications: Notification[];
+export interface PaginatedResponse<T> {
+    items: T[];
+    total: number;
+    page: number;
+    per_page: number;
+    pages: number;
 }
 
-export interface Notification {
-    id: string;
-    type: 'success' | 'error' | 'warning' | 'info';
-    title: string;
+// Form and validation types
+export interface ValidationError {
+    field: string;
     message: string;
-    duration?: number;
-    timestamp: string;
 }
+
+export interface FormState {
+    isSubmitting: boolean;
+    errors: ValidationError[];
+    touched: Record<string, boolean>;
+}
+
+// Theme and UI
+export interface ThemeConfig {
+    mode: 'light' | 'dark';
+    primaryColor: string;
+    accentColor: string;
+    fontFamily: string;
+    fontSize: 'small' | 'medium' | 'large';
+}
+
+// User preferences
+export interface UserPreferences {
+    theme: ThemeConfig;
+    notifications: {
+        email: boolean;
+        push: boolean;
+        game_updates: boolean;
+        chat_mentions: boolean;
+    };
+    accessibility: {
+        high_contrast: boolean;
+        large_text: boolean;
+        screen_reader: boolean;
+    };
+    gameplay: {
+        auto_roll_dice: boolean;
+        show_roll_details: boolean;
+        whisper_mode: boolean;
+    };
+}
+
+// Export все основные типы
+export default {
+    User,
+    Character,
+    Campaign,
+    CampaignDetail,
+    Game,
+    GameDetail,
+    GamePlayer,
+    GameMessage,
+    DiceRollResult,
+    InitiativeEntry,
+    GameState,
+    WebSocketMessage,
+};

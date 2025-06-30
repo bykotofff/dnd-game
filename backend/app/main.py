@@ -90,6 +90,9 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 # Статические файлы
 app.mount("/static", StaticFiles(directory=settings.UPLOAD_DIR), name="static")
 
+# ✅ ИСПРАВЛЕНИЕ: WebSocket роутер БЕЗ префикса /api
+app.include_router(websocket.router, prefix="/ws", tags=["WebSocket"])
+
 # Роутеры API
 app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
 app.include_router(users.router, prefix="/api/users", tags=["Users"])
@@ -97,7 +100,6 @@ app.include_router(characters.router, prefix="/api/characters", tags=["Character
 app.include_router(campaigns.router, prefix="/api/campaigns", tags=["Campaigns"])
 app.include_router(games.router, prefix="/api/games", tags=["Games"])
 app.include_router(images.router, prefix="/api/images", tags=["Images"])
-app.include_router(websocket.router, prefix="/api/ws", tags=["WebSocket"])
 
 
 @app.get("/")
@@ -157,13 +159,13 @@ async def get_api_info():
             "Save/Load Game States"
         ],
         "endpoints": {
-            "auth": "/api/auth",
-            "users": "/api/users",
-            "characters": "/api/characters",
-            "campaigns": "/api/campaigns",
-            "games": "/api/games",
-            "images": "/api/images",
-            "websocket": "/api/ws"
+            "auth": "/api/auth/",
+            "users": "/api/users/",
+            "characters": "/api/characters/",
+            "campaigns": "/api/campaigns/",
+            "games": "/api/games/",
+            "images": "/api/images/",
+            "websocket": "/ws/"
         }
     }
 
