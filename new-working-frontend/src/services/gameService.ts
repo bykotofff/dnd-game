@@ -1,104 +1,72 @@
-import { apiService } from './api';
+import apiService from '@/services/api';
+import type { Game, GameMessage, Character, DiceRollData } from '@/types';
 
-// Типы для создания игры
+// Типы для GameService
 export interface CreateGameData {
-    campaign_id: string;
     name: string;
     description?: string;
-    max_players: number;
+    campaign_id: string;
+    max_players?: number;
+    game_system?: string;
+    settings?: any;
 }
 
-// Типы для обновления игры
 export interface UpdateGameData {
     name?: string;
     description?: string;
-    current_scene?: string;
-    settings?: Record<string, any>;
+    max_players?: number;
+    settings?: any;
 }
 
-// Ответ сервера при получении игры
+export interface JoinGameData {
+    character_id?: string;
+}
+
+export interface GetGamesParams {
+    status_filter?: 'waiting' | 'active' | 'paused' | 'ended';
+    campaign_id?: string;
+    limit?: number;
+    offset?: number;
+}
+
 export interface GameResponse {
     id: string;
     name: string;
-    description?: string;
-    status: 'waiting' | 'active' | 'paused' | 'completed';
+    description: string;
+    status: string;
     current_players: number;
     max_players: number;
     current_scene?: string;
     created_at: string;
 }
 
-// Подробная информация об игре
 export interface GameDetailResponse extends GameResponse {
     campaign_id: string;
-    players: string[]; // user IDs
-    settings?: Record<string, any>;
-    current_turn?: string;
-    turn_number?: number;
-    session_start?: string;
+    game_system: string;
+    settings: any;
+    players: string[];
+    characters: string[];
+    updated_at: string;
 }
 
-// Параметры для получения списка игр
-export interface GetGamesParams {
-    status_filter?: 'waiting' | 'active' | 'paused' | 'completed';
-    campaign_id?: string;
-    limit?: number;
-    offset?: number;
-}
-
-// Присоединение к игре
-export interface JoinGameData {
-    character_id?: string;
-}
-
-// Игровое сообщение чата
-export interface GameMessage {
-    id: string;
-    game_id: string;
-    sender_id: string;
-    sender_name: string;
-    message_type: 'chat' | 'action' | 'roll' | 'system' | 'ai_dm';
-    content: string;
-    timestamp: string;
-    dice_roll?: DiceRollResult;
-    is_whisper?: boolean;
-    whisper_to?: string[];
-}
-
-// Результат броска костей
 export interface DiceRollResult {
     notation: string;
+    result: number;
+    rolls: number[];
     total: number;
-    individual_rolls: number[];
-    modifiers: number;
-    is_critical: boolean;
-    is_fumble: boolean;
+    modifier: number;
     purpose?: string;
-    character_id?: string;
+    character_name?: string;
 }
 
-// ИИ ответ мастера
 export interface AiDmResponse {
-    message: string;
-    scene_description?: string;
-    suggested_actions?: string[];
-    requires_roll?: {
-        type: string;
-        dc: number;
-        ability: string;
-    };
-    combat_update?: {
-        initiative_order?: string[];
-        current_turn?: string;
-        round_number?: number;
-    };
+    response: string;
+    context_used: any;
+    suggestions?: string[];
 }
 
-// Состояние игровой сессии
 export interface GameSessionState {
-    players: GamePlayer[];
     current_scene: string;
-    current_turn?: string;
     initiative_order: InitiativeEntry[];
     environment: {
         lighting: 'bright' | 'dim' | 'dark';
@@ -132,9 +100,12 @@ export interface InitiativeEntry {
 }
 
 class GameService {
-    // Создание новой игры
+    // ✅ УЛУЧШЕННОЕ СОЗДАНИЕ ИГРЫ
     async createGame(data: CreateGameData): Promise<GameResponse> {
-        return apiService.post('/games', data);
+        return apiService.retryRequest(() =>
+                apiService.post('/games', data),
+            2 // Retry только 2 раза для создания
+        );
     }
 
     // Получить список игр
@@ -159,19 +130,29 @@ class GameService {
         return this.getGames({ status_filter: 'active' });
     }
 
-    // Получить игру по ID
+    // ✅ КРИТИЧЕСКИ ВАЖНЫЙ МЕТОД: Получить игру по ID с retry
     async getGame(gameId: string): Promise<GameDetailResponse> {
-        return apiService.get(`/games/${gameId}`);
+        return apiService.retryRequest(
+            () => apiService.getWithExtendedTimeout(`/games/${gameId}`, undefined, 45000),
+            3, // 3 попытки
+            2000 // 2 секунды между попытками
+        );
     }
 
     // Обновить игру
     async updateGame(gameId: string, data: UpdateGameData): Promise<GameDetailResponse> {
-        return apiService.put(`/games/${gameId}`, data);
+        return apiService.retryRequest(() =>
+                apiService.put(`/games/${gameId}`, data),
+            2
+        );
     }
 
-    // Присоединиться к игре
+    // ✅ ПРИСОЕДИНЕНИЕ К ИГРЕ с retry
     async joinGame(gameId: string, data: JoinGameData = {}): Promise<{ message: string }> {
-        return apiService.post(`/games/${gameId}/join`, data);
+        return apiService.retryRequest(() =>
+                apiService.post(`/games/${gameId}/join`, data),
+            3
+        );
     }
 
     // Покинуть игру
@@ -194,9 +175,12 @@ class GameService {
         return apiService.post(`/games/${gameId}/end`);
     }
 
-    // Получить историю сообщений
+    // ✅ ПОЛУЧЕНИЕ СООБЩЕНИЙ с retry
     async getGameMessages(gameId: string, limit: number = 50, offset: number = 0): Promise<GameMessage[]> {
-        return apiService.get(`/games/${gameId}/messages`, { limit, offset });
+        return apiService.retryRequest(() =>
+                apiService.get(`/games/${gameId}/messages`, { limit, offset }),
+            2
+        );
     }
 
     // Отправить сообщение в чат
@@ -218,17 +202,20 @@ class GameService {
 
     // Получить ответ от ИИ-мастера
     async getAiResponse(gameId: string, playerMessage: string, context?: any): Promise<AiDmResponse> {
-        return apiService.post(`/games/${gameId}/ai-response`, {
+        return apiService.postWithExtendedTimeout(`/games/${gameId}/ai-response`, {
             message: playerMessage,
             context,
-        });
+        }, 90000); // 90 секунд для ИИ ответов
     }
 
-    // Инициатива
+    // ✅ ИНИЦИАТИВА с retry
     async rollInitiative(gameId: string, characterId: string): Promise<{ initiative: number }> {
-        return apiService.post(`/games/${gameId}/initiative`, {
-            character_id: characterId,
-        });
+        return apiService.retryRequest(() =>
+                apiService.post(`/games/${gameId}/initiative`, {
+                    character_id: characterId,
+                }),
+            2
+        );
     }
 
     // Получить порядок инициативы
@@ -241,9 +228,12 @@ class GameService {
         return apiService.post(`/games/${gameId}/next-turn`);
     }
 
-    // Получить состояние игровой сессии
+    // ✅ ПОЛУЧЕНИЕ СОСТОЯНИЯ ИГРЫ с retry
     async getGameState(gameId: string): Promise<GameSessionState> {
-        return apiService.get(`/games/${gameId}/state`);
+        return apiService.retryRequest(() =>
+                apiService.get(`/games/${gameId}/state`),
+            2
+        );
     }
 
     // Сохранить состояние игры
@@ -256,9 +246,12 @@ class GameService {
         return apiService.post(`/games/${gameId}/load`, { save_id: saveId });
     }
 
-    // Получить список активных игроков в игре
+    // ✅ ПОЛУЧЕНИЕ АКТИВНЫХ ИГРОКОВ с retry
     async getActivePlayers(gameId: string): Promise<GamePlayer[]> {
-        return apiService.get(`/games/${gameId}/players`);
+        return apiService.retryRequest(() =>
+                apiService.get(`/games/${gameId}/players`),
+            2
+        );
     }
 
     // Обновить HP персонажа в игре
@@ -281,6 +274,32 @@ class GameService {
         turns_count: number;
     }> {
         return apiService.get(`/games/${gameId}/stats`);
+    }
+
+    // ✅ НОВЫЙ МЕТОД: Проверка доступности игры
+    async checkGameAvailability(gameId: string): Promise<boolean> {
+        try {
+            await this.getGame(gameId);
+            return true;
+        } catch (error: any) {
+            console.error('Game availability check failed:', error);
+            return false;
+        }
+    }
+
+    // ✅ НОВЫЙ МЕТОД: Получение краткой информации об игре (без retry для быстрой проверки)
+    async getGameQuick(gameId: string): Promise<GameDetailResponse | null> {
+        try {
+            return await apiService.get(`/games/${gameId}`);
+        } catch (error: any) {
+            console.error('Quick game fetch failed:', error);
+            return null;
+        }
+    }
+
+    // ✅ НОВЫЙ МЕТОД: Проверка подключения к игре
+    async pingGame(gameId: string): Promise<{ status: string; players_online: number }> {
+        return apiService.get(`/games/${gameId}/ping`);
     }
 }
 

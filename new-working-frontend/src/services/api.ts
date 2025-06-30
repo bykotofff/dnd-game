@@ -12,7 +12,7 @@ class ApiService {
         this.api = axios.create({
             // ✅ ИСПРАВЛЕНИЕ: правильная настройка baseURL для dev и production
             baseURL: `${API_BASE_URL}/api`,
-            timeout: 30000,
+            timeout: 60000, // ✅ Увеличиваем таймаут до 60 секунд
             headers: {
                 'Content-Type': 'application/json',
             },
@@ -25,6 +25,11 @@ class ApiService {
         // Request interceptor to add auth token
         this.api.interceptors.request.use(
             (config) => {
+                // ✅ Добавляем логирование запросов в development
+                if (import.meta.env.DEV) {
+                    console.log('🔄 API Request:', config.method?.toUpperCase(), config.url);
+                }
+
                 const tokens = this.getTokens();
                 if (tokens?.access_token) {
                     config.headers.Authorization = `Bearer ${tokens.access_token}`;
@@ -34,11 +39,40 @@ class ApiService {
             (error) => Promise.reject(error)
         );
 
-        // Response interceptor to handle token refresh
+        // Response interceptor to handle token refresh and errors
         this.api.interceptors.response.use(
-            (response) => response,
+            (response) => {
+                // ✅ Логирование успешных ответов в development
+                if (import.meta.env.DEV) {
+                    console.log('✅ API Response:', response.config.method?.toUpperCase(), response.config.url, response.status);
+                }
+                return response;
+            },
             async (error: AxiosError) => {
                 const originalRequest = error.config as any;
+
+                // ✅ Улучшенное логирование ошибок
+                if (import.meta.env.DEV) {
+                    console.error('❌ API Error:', {
+                        method: originalRequest?.method?.toUpperCase(),
+                        url: originalRequest?.url,
+                        status: error.response?.status,
+                        message: error.message,
+                        data: error.response?.data,
+                    });
+                }
+
+                // ✅ Обработка таймаута
+                if (error.code === 'ECONNABORTED' || error.message.includes('timeout')) {
+                    console.error('⏰ Request timeout:', originalRequest?.url);
+                    return Promise.reject(new Error(`Запрос превысил время ожидания (${this.api.defaults.timeout}ms). Проверьте подключение к серверу.`));
+                }
+
+                // ✅ Обработка сетевых ошибок
+                if (error.code === 'ERR_NETWORK' || !error.response) {
+                    console.error('🌐 Network error:', error.message);
+                    return Promise.reject(new Error('Ошибка сети. Проверьте подключение к интернету и доступность сервера.'));
+                }
 
                 if (error.response?.status === 401 && !originalRequest._retry) {
                     originalRequest._retry = true;
@@ -59,6 +93,21 @@ class ApiService {
                         window.location.href = '/login';
                         return Promise.reject(refreshError);
                     }
+                }
+
+                // ✅ Обработка 404 ошибок для игр
+                if (error.response?.status === 404 && originalRequest?.url?.includes('/games/')) {
+                    return Promise.reject(new Error('Игра не найдена или была удалена'));
+                }
+
+                // ✅ Обработка 403 ошибок
+                if (error.response?.status === 403) {
+                    return Promise.reject(new Error('Недостаточно прав для выполнения этого действия'));
+                }
+
+                // ✅ Обработка 500 ошибок
+                if (error.response?.status >= 500) {
+                    return Promise.reject(new Error('Ошибка сервера. Попробуйте позже'));
                 }
 
                 return Promise.reject(error);
@@ -124,6 +173,22 @@ class ApiService {
         });
     }
 
+    // ✅ Специальный метод для критичных запросов с повышенным таймаутом
+    async getWithExtendedTimeout<T>(url: string, params?: any, timeoutMs: number = 120000): Promise<T> {
+        const response = await this.api.get<T>(url, {
+            params,
+            timeout: timeoutMs,
+        });
+        return response.data;
+    }
+
+    async postWithExtendedTimeout<T>(url: string, data?: any, timeoutMs: number = 120000): Promise<T> {
+        const response = await this.api.post<T>(url, data, {
+            timeout: timeoutMs,
+        });
+        return response.data;
+    }
+
     // Generic API methods
     async get<T>(url: string, params?: any): Promise<T> {
         const response = await this.api.get<T>(url, { params });
@@ -159,6 +224,7 @@ class ApiService {
             headers: {
                 'Content-Type': 'multipart/form-data',
             },
+            timeout: 300000, // 5 минут для загрузки файлов
             onUploadProgress: (progressEvent) => {
                 if (onProgress && progressEvent.total) {
                     const progress = Math.round((progressEvent.loaded * 100) / progressEvent.total);
@@ -170,11 +236,18 @@ class ApiService {
         return response.data;
     }
 
-    // Health check
+    // ✅ Health check с простой обработкой ошибок
     async healthCheck(): Promise<{ status: string; services: Record<string, string> }> {
-        // Для health check используем прямой URL без proxy
-        const response = await axios.get(`${API_BASE_URL}/health`);
-        return response.data;
+        try {
+            // Для health check используем прямой URL без proxy
+            const response = await axios.get(`${API_BASE_URL}/health`, {
+                timeout: 10000, // Короткий таймаут для health check
+            });
+            return response.data;
+        } catch (error) {
+            console.error('Health check failed:', error);
+            throw new Error('Сервер недоступен');
+        }
     }
 
     // Get auth status without making request if no token
@@ -186,6 +259,47 @@ class ApiService {
     // Get base URL for static files
     getStaticUrl(path: string): string {
         return `${API_BASE_URL}/static/${path}`;
+    }
+
+    // ✅ Метод для проверки доступности сервера
+    async checkServerAvailability(): Promise<boolean> {
+        try {
+            await this.healthCheck();
+            return true;
+        } catch {
+            return false;
+        }
+    }
+
+    // ✅ Retry механизм для критичных запросов
+    async retryRequest<T>(
+        requestFn: () => Promise<T>,
+        maxRetries: number = 3,
+        delay: number = 1000
+    ): Promise<T> {
+        let lastError: Error;
+
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+                return await requestFn();
+            } catch (error: any) {
+                lastError = error;
+
+                // Не ретраим 401, 403, 404 ошибки
+                if (error.response?.status && [401, 403, 404].includes(error.response.status)) {
+                    throw error;
+                }
+
+                if (attempt < maxRetries) {
+                    console.log(`Попытка ${attempt} не удалась, повторяем через ${delay}ms...`);
+                    await new Promise(resolve => setTimeout(resolve, delay * attempt));
+                } else {
+                    console.error(`Все ${maxRetries} попыток не удались`);
+                }
+            }
+        }
+
+        throw lastError!;
     }
 }
 

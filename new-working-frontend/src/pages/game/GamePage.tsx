@@ -44,6 +44,8 @@ const GamePage: React.FC = () => {
     } = useGameData();
 
     const {
+        connectToGame,
+        disconnectFromGame,
         loadGame,
         leaveGame,
         clearGame,
@@ -67,13 +69,18 @@ const GamePage: React.FC = () => {
 
     // Загрузка игры при монтировании
     useEffect(() => {
-        if (gameId) {
-            connectToGame(gameId);
+        if (gameId && connectToGame && disconnectFromGame) {
+            // ✅ Используем только connectToGame, который теперь сам загружает игру
+            connectToGame(gameId).catch((error) => {
+                console.error('Failed to connect to game:', error);
+            });
         }
 
         // Очистка при размонтировании
         return () => {
-            disconnectFromGame();
+            if (disconnectFromGame) {
+                disconnectFromGame();
+            }
         };
     }, [gameId, connectToGame, disconnectFromGame]);
 
@@ -146,7 +153,7 @@ const GamePage: React.FC = () => {
             <div className="min-h-screen bg-gray-900 flex items-center justify-center">
                 <div className="text-center">
                     <h2 className="text-2xl font-bold text-white mb-4">Игра не найдена</h2>
-                    <Button onClick={() => navigate('/campaigns')}>
+                    <Button onClick={() => navigate('/campaigns')} variant="outline">
                         Вернуться к кампаниям
                     </Button>
                 </div>
@@ -155,136 +162,197 @@ const GamePage: React.FC = () => {
     }
 
     return (
-        <div className="min-h-screen bg-gray-900 text-white flex flex-col">
-            {/* Header */}
-            <header className="bg-gray-800 border-b border-gray-700 px-4 py-3 flex items-center justify-between">
-                <div className="flex items-center gap-4">
-                    <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => navigate('/campaigns')}
-                        className="text-gray-400 hover:text-white"
-                    >
-                        <ArrowLeftIcon className="w-5 h-5" />
-                    </Button>
-
-                    <div>
-                        <h1 className="text-xl font-bold">{currentGame.name}</h1>
-                        <div className="flex items-center gap-4 text-sm text-gray-400">
-                            <span>Раунд {turnNumber}</span>
-                            {currentScene && <span>• {currentScene}</span>}
-                            <span>• {activePlayers.length} игроков онлайн</span>
+        <div className="min-h-screen bg-gray-900 text-white flex">
+            {/* Main game area */}
+            <div className="flex-1 flex flex-col">
+                {/* Header */}
+                <header className="bg-gray-800 border-b border-gray-700 px-4 py-3 flex items-center justify-between">
+                    <div className="flex items-center space-x-4">
+                        <Button
+                            onClick={() => navigate('/campaigns')}
+                            variant="ghost"
+                            className="text-gray-400 hover:text-white"
+                        >
+                            <ArrowLeftIcon className="w-5 h-5" />
+                        </Button>
+                        <div>
+                            <h1 className="text-lg font-semibold text-white">
+                                {currentGame.title}
+                            </h1>
+                            <p className="text-sm text-gray-400">
+                                {currentGame.game_system} • {players.length} игроков онлайн
+                            </p>
                         </div>
                     </div>
-                </div>
 
-                <div className="flex items-center gap-3">
-                    {/* Статус подключения */}
-                    <div className={`flex items-center gap-2 text-sm ${connectionStatus.color}`}>
-                        <connectionStatus.icon className="w-4 h-4" />
-                        <span className="hidden sm:inline">{connectionStatus.text}</span>
+                    <div className="flex items-center space-x-3">
+                        {/* Connection status */}
+                        <div className="flex items-center space-x-2">
+                            <connectionStatus.icon className={`w-4 h-4 ${connectionStatus.color}`} />
+                            <span className={`text-sm ${connectionStatus.color}`}>
+                                {connectionStatus.text}
+                            </span>
+                        </div>
+
+                        {/* Settings */}
+                        <Button variant="ghost" className="text-gray-400 hover:text-white">
+                            <Cog6ToothIcon className="w-5 h-5" />
+                        </Button>
+
+                        {/* Leave game */}
+                        <Button
+                            onClick={handleLeaveGame}
+                            variant="outline"
+                            className="text-red-400 border-red-400 hover:bg-red-400 hover:text-white"
+                        >
+                            Покинуть игру
+                        </Button>
                     </div>
+                </header>
 
-                    {/* Настройки */}
-                    <Button
-                        variant="ghost"
-                        size="icon"
-                        className="text-gray-400 hover:text-white"
-                    >
-                        <Cog6ToothIcon className="w-5 h-5" />
-                    </Button>
-
-                    {/* Выход */}
-                    <Button
-                        variant="ghost"
-                        onClick={handleLeaveGame}
-                        className="text-red-400 hover:text-red-300 hover:bg-red-900/20"
-                    >
-                        Покинуть игру
-                    </Button>
-                </div>
-            </header>
-
-            {/* Основной контент */}
-            <div className="flex-1 flex overflow-hidden">
-                {/* Левая панель - персонаж и информация */}
-                <div className="w-80 bg-gray-800 border-r border-gray-700 flex flex-col">
-                    {/* Карточка персонажа */}
-                    {currentPlayer && (
-                        <div className="p-4 border-b border-gray-700">
-                            <CharacterCard
-                                player={currentPlayer}
-                                isCurrentTurn={isCurrentTurn}
-                                compact
+                {/* Game content */}
+                <div className="flex-1 flex">
+                    {/* Main content area */}
+                    <div className="flex-1 flex flex-col">
+                        {/* Scene panel */}
+                        <div className="flex-1 p-4">
+                            <ScenePanel
+                                scene={currentScene}
+                                gameId={gameId!}
                             />
                         </div>
-                    )}
 
-                    {/* Сцена */}
-                    <div className="flex-1 overflow-auto">
-                        <ScenePanel
-                            scene={currentScene}
-                            description={currentGame.description || ''}
-                        />
+                        {/* Character sheet area */}
+                        {selectedCharacterId && (
+                            <motion.div
+                                initial={{ height: 0, opacity: 0 }}
+                                animate={{ height: 'auto', opacity: 1 }}
+                                exit={{ height: 0, opacity: 0 }}
+                                className="border-t border-gray-700 bg-gray-800"
+                            >
+                                <div className="p-4">
+                                    <CharacterCard characterId={selectedCharacterId} />
+                                </div>
+                            </motion.div>
+                        )}
+
+                        {/* Current turn indicator */}
+                        {isCurrentTurn && (
+                            <motion.div
+                                initial={{ opacity: 0, y: 20 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                className="bg-blue-600 text-white p-3 mx-4 mb-4 rounded-lg shadow-lg"
+                            >
+                                <div className="flex items-center justify-between">
+                                    <span className="font-medium">Ваш ход!</span>
+                                    <span className="text-sm opacity-80">
+                                        Ход #{turnNumber}
+                                    </span>
+                                </div>
+                            </motion.div>
+                        )}
                     </div>
-                </div>
 
-                {/* Центральная область - чат */}
-                <div className="flex-1 flex flex-col">
-                    <GameChat />
-                </div>
-
-                {/* Правая боковая панель */}
-                <AnimatePresence>
-                    {sidebarOpen && (
-                        <motion.div
-                            initial={{ width: 0, opacity: 0 }}
-                            animate={{ width: 320, opacity: 1 }}
-                            exit={{ width: 0, opacity: 0 }}
-                            transition={{ duration: 0.3 }}
-                            className="bg-gray-800 border-l border-gray-700 flex flex-col overflow-hidden"
-                        >
-                            {/* Переключатели панелей */}
-                            <div className="flex border-b border-gray-700">
-                                {[
-                                    { id: 'chat', label: 'Чат', icon: ChatBubbleLeftRightIcon },
-                                    { id: 'players', label: 'Игроки', icon: UsersIcon },
-                                    { id: 'dice', label: 'Кости', icon: CubeIcon },
-                                    { id: 'initiative', label: 'Инициатива', icon: ClockIcon },
-                                ].map((panel) => (
+                    {/* Sidebar */}
+                    <AnimatePresence>
+                        {sidebarOpen && (
+                            <motion.div
+                                initial={{ width: 0, opacity: 0 }}
+                                animate={{ width: 384, opacity: 1 }}
+                                exit={{ width: 0, opacity: 0 }}
+                                className="bg-gray-800 border-l border-gray-700 flex flex-col"
+                            >
+                                {/* Sidebar tabs */}
+                                <div className="flex bg-gray-900 border-b border-gray-700">
                                     <button
-                                        key={panel.id}
-                                        onClick={() => setActivePanel(panel.id as any)}
-                                        className={`flex-1 p-3 text-center text-sm font-medium transition-colors ${
-                                            activePanel === panel.id
-                                                ? 'bg-gray-700 text-white border-b-2 border-blue-500'
-                                                : 'text-gray-400 hover:text-white hover:bg-gray-700/50'
+                                        onClick={() => setActivePanel('chat')}
+                                        className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 text-sm font-medium transition-colors ${
+                                            activePanel === 'chat'
+                                                ? 'bg-blue-600 text-white'
+                                                : 'text-gray-400 hover:text-white hover:bg-gray-700'
                                         }`}
                                     >
-                                        <panel.icon className="w-4 h-4 mx-auto mb-1" />
-                                        <span className="hidden lg:block">{panel.label}</span>
+                                        <ChatBubbleLeftRightIcon className="w-4 h-4" />
+                                        Чат
                                     </button>
-                                ))}
-                            </div>
+                                    <button
+                                        onClick={() => setActivePanel('players')}
+                                        className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 text-sm font-medium transition-colors ${
+                                            activePanel === 'players'
+                                                ? 'bg-blue-600 text-white'
+                                                : 'text-gray-400 hover:text-white hover:bg-gray-700'
+                                        }`}
+                                    >
+                                        <UsersIcon className="w-4 h-4" />
+                                        Игроки
+                                    </button>
+                                    <button
+                                        onClick={() => setActivePanel('dice')}
+                                        className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 text-sm font-medium transition-colors ${
+                                            activePanel === 'dice'
+                                                ? 'bg-blue-600 text-white'
+                                                : 'text-gray-400 hover:text-white hover:bg-gray-700'
+                                        }`}
+                                    >
+                                        <CubeIcon className="w-4 h-4" />
+                                        Кости
+                                    </button>
+                                    <button
+                                        onClick={() => setActivePanel('initiative')}
+                                        className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 text-sm font-medium transition-colors ${
+                                            activePanel === 'initiative'
+                                                ? 'bg-blue-600 text-white'
+                                                : 'text-gray-400 hover:text-white hover:bg-gray-700'
+                                        }`}
+                                    >
+                                        <ClockIcon className="w-4 h-4" />
+                                        Инициатива
+                                    </button>
+                                </div>
 
-                            {/* Содержимое панелей */}
-                            <div className="flex-1 overflow-auto">
-                                {activePanel === 'players' && <PlayersPanel />}
-                                {activePanel === 'dice' && <DicePanel />}
-                                {activePanel === 'initiative' && <InitiativeTracker />}
-                            </div>
+                                {/* Sidebar content */}
+                                <div className="flex-1 overflow-hidden">
+                                    {activePanel === 'chat' && (
+                                        <GameChat
+                                            gameId={gameId!}
+                                            messages={messages}
+                                        />
+                                    )}
+                                    {activePanel === 'players' && (
+                                        <PlayersPanel
+                                            players={activePlayers}
+                                            currentUserId={user?.id}
+                                        />
+                                    )}
+                                    {activePanel === 'dice' && (
+                                        <DicePanel gameId={gameId!} />
+                                    )}
+                                    {activePanel === 'initiative' && (
+                                        <InitiativeTracker
+                                            gameId={gameId!}
+                                            players={activePlayers}
+                                            currentTurn={currentTurn}
+                                        />
+                                    )}
+                                </div>
+                            </motion.div>
+                        )}
+                    </AnimatePresence>
+
+                    {/* Sidebar toggle */}
+                    <button
+                        onClick={() => setSidebarOpen(!sidebarOpen)}
+                        className="fixed right-4 top-1/2 transform -translate-y-1/2 bg-gray-800 hover:bg-gray-700 text-white p-2 rounded-l-lg border border-r-0 border-gray-600 z-10 transition-colors"
+                    >
+                        <motion.div
+                            animate={{ rotate: sidebarOpen ? 180 : 0 }}
+                            transition={{ duration: 0.2 }}
+                        >
+                            <ArrowLeftIcon className="w-4 h-4" />
                         </motion.div>
-                    )}
-                </AnimatePresence>
+                    </button>
+                </div>
             </div>
-
-            {/* Кнопка скрытия/показа боковой панели */}
-            <button
-                onClick={() => setSidebarOpen(!sidebarOpen)}
-                className="fixed right-4 top-1/2 transform -translate-y-1/2 bg-gray-800 border border-gray-700 text-white p-2 rounded-lg shadow-lg hover:bg-gray-700 transition-colors z-50"
-            >
-                {sidebarOpen ? '→' : '←'}
-            </button>
         </div>
     );
 };
