@@ -70,9 +70,9 @@ const CreateCampaignPage: React.FC = () => {
 
     const {
         register,
-        handleSubmit,
         watch,
         setValue,
+        trigger, // ✅ Добавляем trigger для валидации отдельных шагов
         formState: { errors },
     } = useForm<FormData>({
         defaultValues: {
@@ -92,30 +92,90 @@ const CreateCampaignPage: React.FC = () => {
                 navigate(`/campaigns/${campaign.id}`);
             },
             onError: (error: any) => {
-                toast.error(error.response?.data?.detail || 'Ошибка при создании кампании');
+                console.error('Create campaign error:', error);
+                const errorMessage = error.response?.data?.detail || 'Ошибка при создании кампании';
+                toast.error(errorMessage);
             },
         }
     );
 
-    const onSubmit = (data: FormData) => {
-        const campaignData: CreateCampaignData = {
-            ...data,
-            setting: selectedSetting,
-            ai_style: selectedAiStyle,
-        };
-        createMutation.mutate(campaignData);
-    };
+    // ✅ ИСПРАВЛЕННАЯ ФУНКЦИЯ: Переход на следующий шаг с валидацией
+    const nextStep = async () => {
+        if (currentStep >= 4) return;
 
-    const nextStep = () => {
-        if (currentStep < 4) {
-            setCurrentStep(currentStep + 1);
+        let fieldsToValidate: string[] = [];
+        let isValid = true;
+
+        switch (currentStep) {
+            case 1:
+                fieldsToValidate = ['name', 'description'];
+                isValid = await trigger(fieldsToValidate);
+                if (!isValid) {
+                    toast.error('Заполните название и описание кампании');
+                    return;
+                }
+                break;
+
+            case 2:
+                if (!selectedSetting) {
+                    toast.error('Выберите сеттинг для продолжения');
+                    return;
+                }
+                break;
+
+            case 3:
+                fieldsToValidate = ['max_players', 'starting_level'];
+                isValid = await trigger(fieldsToValidate);
+                if (!selectedAiStyle) {
+                    toast.error('Выберите стиль ИИ для продолжения');
+                    return;
+                }
+                if (!isValid) {
+                    toast.error('Проверьте настройки игры');
+                    return;
+                }
+                break;
         }
+
+        setCurrentStep(currentStep + 1);
     };
 
     const prevStep = () => {
         if (currentStep > 1) {
             setCurrentStep(currentStep - 1);
         }
+    };
+
+    // ✅ НОВАЯ ФУНКЦИЯ: Финальное создание кампании
+    const handleCreateCampaign = async () => {
+        // Получаем все данные формы
+        const formData = watch();
+
+        // Финальная валидация
+        if (!formData.name?.trim()) {
+            toast.error('Введите название кампании');
+            return;
+        }
+
+        if (!selectedSetting) {
+            toast.error('Выберите сеттинг');
+            return;
+        }
+
+        // Валидируем все поля
+        const isValid = await trigger();
+        if (!isValid) {
+            toast.error('Проверьте заполнение всех полей');
+            return;
+        }
+
+        const campaignData: CreateCampaignData = {
+            ...formData,
+            setting: selectedSetting,
+            ai_style: selectedAiStyle,
+        };
+
+        createMutation.mutate(campaignData);
     };
 
     const steps = [
@@ -183,8 +243,8 @@ const CreateCampaignPage: React.FC = () => {
                 </div>
             </div>
 
-            {/* Form */}
-            <form onSubmit={handleSubmit(onSubmit)}>
+            {/* ✅ ИСПРАВЛЕННЫЙ КОНТЕЙНЕР: убрали <form> чтобы предотвратить автоотправку */}
+            <div>
                 <Card>
                     <CardHeader>
                         <CardTitle className="flex items-center gap-2">
@@ -234,29 +294,30 @@ const CreateCampaignPage: React.FC = () => {
                                                 </label>
                                                 <Input
                                                     {...register('max_players', {
-                                                        required: true,
-                                                        min: 1,
-                                                        max: 8
+                                                        required: 'Укажите количество игроков',
+                                                        min: { value: 1, message: 'Минимум 1 игрок' },
+                                                        max: { value: 8, message: 'Максимум 8 игроков' }
                                                     })}
                                                     type="number"
                                                     min="1"
                                                     max="8"
+                                                    error={errors.max_players?.message}
                                                 />
                                             </div>
-
                                             <div>
                                                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                                                     Стартовый уровень
                                                 </label>
                                                 <Input
                                                     {...register('starting_level', {
-                                                        required: true,
-                                                        min: 1,
-                                                        max: 20
+                                                        required: 'Укажите стартовый уровень',
+                                                        min: { value: 1, message: 'Минимальный уровень 1' },
+                                                        max: { value: 20, message: 'Максимальный уровень 20' }
                                                     })}
                                                     type="number"
                                                     min="1"
                                                     max="20"
+                                                    error={errors.starting_level?.message}
                                                 />
                                             </div>
                                         </div>
@@ -378,7 +439,7 @@ const CreateCampaignPage: React.FC = () => {
                                     </div>
                                 )}
 
-                                {/* Step 4: Players and Access */}
+                                {/* ✅ Step 4: Players and Access - ЭТОТ ШАГ ТЕПЕРЬ ОТОБРАЖАЕТСЯ */}
                                 {currentStep === 4 && (
                                     <div className="space-y-6">
                                         <div className="space-y-4">
@@ -421,15 +482,15 @@ const CreateCampaignPage: React.FC = () => {
                                             </div>
                                         </div>
 
-                                        <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-4">
+                                        <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-4">
                                             <div className="flex">
-                                                <SparklesIcon className="w-5 h-5 text-amber-600 dark:text-amber-400 mt-0.5" />
+                                                <CheckIcon className="w-5 h-5 text-green-600 dark:text-green-400 mt-0.5" />
                                                 <div className="ml-3">
-                                                    <h4 className="text-sm font-medium text-amber-800 dark:text-amber-200">
-                                                        Готово к созданию!
+                                                    <h4 className="text-sm font-medium text-green-800 dark:text-green-200">
+                                                        Все готово к созданию!
                                                     </h4>
-                                                    <p className="text-sm text-amber-700 dark:text-amber-300 mt-1">
-                                                        ИИ-мастер будет готов управлять вашей кампанией сразу после создания.
+                                                    <p className="text-sm text-green-700 dark:text-green-300 mt-1">
+                                                        Ваша кампания будет создана со всеми указанными настройками.
                                                     </p>
                                                 </div>
                                             </div>
@@ -441,7 +502,7 @@ const CreateCampaignPage: React.FC = () => {
                     </CardContent>
                 </Card>
 
-                {/* Navigation */}
+                {/* ✅ ИСПРАВЛЕННАЯ НАВИГАЦИЯ */}
                 <div className="flex justify-between mt-8">
                     <Button
                         type="button"
@@ -466,8 +527,9 @@ const CreateCampaignPage: React.FC = () => {
                         </Button>
                     ) : (
                         <Button
-                            type="submit"
+                            type="button"  // ✅ Изменили на type="button"
                             variant="primary"
+                            onClick={handleCreateCampaign}  // ✅ Используем отдельную функцию
                             disabled={createMutation.isLoading}
                             className="flex items-center gap-2"
                         >
@@ -485,7 +547,7 @@ const CreateCampaignPage: React.FC = () => {
                         </Button>
                     )}
                 </div>
-            </form>
+            </div>
         </div>
     );
 };

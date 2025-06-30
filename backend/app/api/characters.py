@@ -105,15 +105,46 @@ async def create_character(
 ):
     """Создать нового персонажа"""
     try:
+        # ✅ ИСПРАВЛЕНИЕ: Фильтруем данные и убираем лишние поля
+        character_dict = character_data.model_dump()
+        # Убираем поля которые рассчитываются автоматически
+        excluded_fields = {
+            'max_hit_points', 'current_hit_points', 'temporary_hit_points',
+            'armor_class', 'speed', 'proficiency_bonus', 'experience_points'
+        }
+        filtered_data = {k: v for k, v in character_dict.items()
+                         if k not in excluded_fields and v is not None}
+
+        # ✅ Устанавливаем значения по умолчанию для обязательных полей
+        filtered_data.setdefault('level', 1)
+        filtered_data.setdefault('experience_points', 0)
+
         # Создаем персонажа
         character = Character(
             owner_id=current_user.id,
-            **character_data.model_dump()
+            **filtered_data
         )
+
+        # ✅ ИСПРАВЛЕНИЕ: Устанавливаем значения по умолчанию перед расчетом HP
+        if not hasattr(character, 'constitution') or character.constitution is None:
+            character.constitution = 10
+        if not hasattr(character, 'dexterity') or character.dexterity is None:
+            character.dexterity = 10
+        if not hasattr(character, 'level') or character.level is None:
+            character.level = 1
 
         # Рассчитываем начальные HP
         character.max_hit_points = character.calculate_max_hp()
         character.current_hit_points = character.max_hit_points
+        character.temporary_hit_points = 0
+
+        # Рассчитываем AC
+        dex_modifier = character.get_ability_modifier(character.dexterity)
+        character.armor_class = 10 + dex_modifier
+
+        # Устанавливаем другие значения по умолчанию
+        character.speed = 30
+        character.proficiency_bonus = 2
 
         db.add(character)
         await db.commit()
@@ -134,10 +165,11 @@ async def create_character(
 
     except Exception as e:
         logger.error(f"Error creating character: {e}")
+        logger.error(f"Character data: {character_data}")
         await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to create character"
+            detail=f"Failed to create character: {str(e)}"
         )
 
 

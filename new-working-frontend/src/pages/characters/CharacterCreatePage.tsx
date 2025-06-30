@@ -166,18 +166,28 @@ const CharacterCreatePage: React.FC = () => {
     const onSubmit = async (data: CreateCharacterData) => {
         try {
             const characterData = {
-                ...data,
-                level: 1,
-                experience_points: 0,
-                max_hit_points: selectedClass ? selectedClass.hitDie + getAbilityModifier(data.constitution) : 8,
-                current_hit_points: selectedClass ? selectedClass.hitDie + getAbilityModifier(data.constitution) : 8,
-                temporary_hit_points: 0,
-                armor_class: 10 + getAbilityModifier(data.dexterity),
-                speed: 30,
-                proficiency_bonus: 2,
+                name: data.name,
+                race: data.race,
+                character_class: data.character_class,
+                background: data.background || null,
+                alignment: data.alignment || null,
+                // Основные характеристики
+                strength: Number(data.strength),
+                dexterity: Number(data.dexterity),
+                constitution: Number(data.constitution),
+                intelligence: Number(data.intelligence),
+                wisdom: Number(data.wisdom),
+                charisma: Number(data.charisma),
+                // Описательные поля
+                appearance: data.appearance || null,
+                personality_traits: data['personality_traits'] || null,
+                ideals: data.ideals || null,
+                bonds: data.bonds || null,
+                flaws: data.flaws || null,
+                backstory: data.backstory || null
             };
 
-            const response = await apiService.post('/api/characters/', characterData);
+            const response = await apiService.post('/characters/', characterData);
             toast.success('Персонаж создан успешно!');
             navigate(`/characters/${response.id}`);
         } catch (error: any) {

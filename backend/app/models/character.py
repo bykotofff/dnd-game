@@ -102,17 +102,19 @@ class Character(BaseModel):
 
     def get_ability_modifier(self, ability_score: int) -> int:
         """Получить модификатор характеристики"""
+        if ability_score is None:
+            ability_score = 10
         return (ability_score - 10) // 2
 
     def get_modifiers(self) -> dict:
         """Получить все модификаторы характеристик"""
         return {
-            "strength": self.get_ability_modifier(self.strength),
-            "dexterity": self.get_ability_modifier(self.dexterity),
-            "constitution": self.get_ability_modifier(self.constitution),
-            "intelligence": self.get_ability_modifier(self.intelligence),
-            "wisdom": self.get_ability_modifier(self.wisdom),
-            "charisma": self.get_ability_modifier(self.charisma),
+            "strength": self.get_ability_modifier(getattr(self, 'strength', 10)),
+            "dexterity": self.get_ability_modifier(getattr(self, 'dexterity', 10)),
+            "constitution": self.get_ability_modifier(getattr(self, 'constitution', 10)),
+            "intelligence": self.get_ability_modifier(getattr(self, 'intelligence', 10)),
+            "wisdom": self.get_ability_modifier(getattr(self, 'wisdom', 10)),
+            "charisma": self.get_ability_modifier(getattr(self, 'charisma', 10)),
         }
 
     def get_saving_throw_bonus(self, ability: str) -> int:
@@ -164,6 +166,8 @@ class Character(BaseModel):
     def calculate_max_hp(self) -> int:
         """Рассчитать максимальные очки жизни"""
         # Упрощенный расчет, в реальности зависит от класса и уровня
+        constitution = getattr(self, 'constitution', 10) or 10
+        level = getattr(self, 'level', 1) or 1
         con_modifier = self.get_ability_modifier(self.constitution)
         base_hp = 8 + con_modifier  # Предполагаем среднее значение
         level_hp = (self.level - 1) * (5 + con_modifier)  # Средний прирост за уровень

@@ -11,7 +11,7 @@ class ApiService {
     constructor() {
         this.api = axios.create({
             // ✅ ИСПРАВЛЕНИЕ: правильная настройка baseURL для dev и production
-            baseURL: import.meta.env.DEV ? '/api' : `${API_BASE_URL}/api`,
+            baseURL: `${API_BASE_URL}/api`,
             timeout: 30000,
             headers: {
                 'Content-Type': 'application/json',
