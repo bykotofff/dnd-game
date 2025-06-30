@@ -1,3 +1,5 @@
+# backend/app/models/game.py
+
 from sqlalchemy import Column, String, Integer, Boolean, Text, ForeignKey, Enum as SQLEnum
 from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.postgresql import JSONB, UUID
@@ -181,13 +183,29 @@ class Game(BaseModel):
         """Получить значение из состояния мира"""
         return self.world_state.get(key, default)
 
+    # ✅ ИСПРАВЛЕННЫЙ МЕТОД: Возвращает данные в формате, совместимом с GameResponse
     def get_game_info(self) -> dict:
-        """Получить информацию об игре"""
+        """Получить информацию об игре для API ответа"""
         return {
             "id": str(self.id),
             "name": self.name,
             "description": self.description,
             "status": self.status.value,
+            "current_players": self.current_players,  # ✅ Прямое поле
+            "max_players": self.max_players,          # ✅ Прямое поле
+            "current_scene": self.current_scene,
+            "created_at": self.created_at.isoformat(),
+        }
+
+    # ✅ НОВЫЙ МЕТОД: Подробная информация для детального просмотра
+    def get_detailed_game_info(self) -> dict:
+        """Получить подробную информацию об игре"""
+        return {
+            "id": str(self.id),
+            "name": self.name,
+            "description": self.description,
+            "status": self.status.value,
+            "campaign_id": str(self.campaign_id),
             "players": {
                 "current": self.current_players,
                 "max": self.max_players,
@@ -201,6 +219,7 @@ class Game(BaseModel):
                 "current_player_id": self.get_current_player(),
             },
             "settings": self.settings,
+            "world_state": self.world_state,
             "statistics": {
                 "session_duration": self.session_duration,
                 "messages_count": self.messages_count,

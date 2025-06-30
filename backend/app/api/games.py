@@ -1,3 +1,5 @@
+# backend/app/api/games.py
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
@@ -15,6 +17,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+# ✅ ИСПРАВЛЕННЫЕ PYDANTIC МОДЕЛИ
 class GameCreate(BaseModel):
     campaign_id: str
     name: str
@@ -29,6 +32,11 @@ class GameUpdate(BaseModel):
     settings: Optional[Dict[str, Any]] = None
 
 
+class JoinGameData(BaseModel):
+    character_id: Optional[str] = None
+
+
+# ✅ ИСПРАВЛЕННАЯ МОДЕЛЬ GameResponse - соответствует get_game_info()
 class GameResponse(BaseModel):
     id: str
     name: str
@@ -38,6 +46,27 @@ class GameResponse(BaseModel):
     max_players: int
     current_scene: Optional[str]
     created_at: str
+
+    class Config:
+        from_attributes = True
+
+
+# ✅ НОВАЯ МОДЕЛЬ для детального просмотра игры
+class GameDetailResponse(BaseModel):
+    id: str
+    name: str
+    description: Optional[str]
+    status: str
+    campaign_id: str
+    players: Dict[str, Any]
+    characters: List[str]
+    current_scene: Optional[str]
+    turn_info: Dict[str, Any]
+    settings: Dict[str, Any]
+    world_state: Dict[str, Any]
+    statistics: Dict[str, Any]
+    created_at: str
+    updated_at: str
 
     class Config:
         from_attributes = True
@@ -62,11 +91,15 @@ async def create_game(
                 detail="Campaign not found"
             )
 
-        # Проверяем права (только создатель кампании может создавать игры)
-        if str(campaign.creator_id) != str(current_user.id):
+        # Проверяем права (создатель кампании или участник может создавать игры)
+        user_id = str(current_user.id)
+        is_creator = str(campaign.creator_id) == user_id
+        is_participant = user_id in (campaign.players or [])
+
+        if not (is_creator or is_participant):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Only campaign creator can create games"
+                detail="Only campaign creator or participants can create games"
             )
 
         # Создаем игру
@@ -75,7 +108,10 @@ async def create_game(
             name=game_data.name,
             description=game_data.description,
             max_players=game_data.max_players,
-            status=GameStatus.WAITING
+            status=GameStatus.WAITING,
+            current_players=0,  # ✅ Явно устанавливаем 0
+            players=[],         # ✅ Пустой список
+            characters=[]       # ✅ Пустой список
         )
 
         db.add(game)
@@ -84,6 +120,7 @@ async def create_game(
 
         logger.info(f"Game created: {game.name} by {current_user.username}")
 
+        # ✅ Используем исправленный метод
         game_info = game.get_game_info()
         return GameResponse(**game_info)
 
@@ -104,6 +141,7 @@ async def get_games(
         campaign_id: Optional[str] = None,
         limit: int = 20,
         offset: int = 0,
+        current_user: User = Depends(get_current_user),  # ✅ Добавили аутентификацию
         db: AsyncSession = Depends(get_db_session)
 ):
     """Получить список игр"""
@@ -129,10 +167,29 @@ async def get_games(
         result = await db.execute(query)
         games = result.scalars().all()
 
-        return [
-            GameResponse(**game.get_game_info())
-            for game in games
-        ]
+        # ✅ ИСПРАВЛЕННОЕ СОЗДАНИЕ ОТВЕТА
+        response_data = []
+        for game in games:
+            try:
+                game_info = game.get_game_info()
+                response_data.append(GameResponse(**game_info))
+            except Exception as e:
+                logger.error(f"Error processing game {game.id}: {e}")
+                # Создаем fallback данные если что-то пошло не так
+                fallback_data = {
+                    "id": str(game.id),
+                    "name": game.name or "Unnamed Game",
+                    "description": game.description,
+                    "status": game.status.value if game.status else "waiting",
+                    "current_players": getattr(game, 'current_players', 0),
+                    "max_players": getattr(game, 'max_players', 6),
+                    "current_scene": getattr(game, 'current_scene', None),
+                    "created_at": game.created_at.isoformat() if game.created_at else "",
+                }
+                response_data.append(GameResponse(**fallback_data))
+
+        logger.info(f"Returned {len(response_data)} games for user {current_user.username}")
+        return response_data
 
     except HTTPException:
         raise
@@ -144,13 +201,13 @@ async def get_games(
         )
 
 
-@router.get("/{game_id}")
+@router.get("/{game_id}", response_model=GameDetailResponse)
 async def get_game(
         game_id: str,
         current_user: User = Depends(get_current_user),
         db: AsyncSession = Depends(get_db_session)
 ):
-    """Получить информацию об игре"""
+    """Получить детальную информацию об игре"""
     try:
         query = select(Game).where(Game.id == game_id)
         result = await db.execute(query)
@@ -168,16 +225,19 @@ async def get_game(
         campaign = campaign_result.scalar_one()
 
         user_id = str(current_user.id)
-        is_player = user_id in game.players
+        is_player = user_id in (game.players or [])
         is_creator = str(campaign.creator_id) == user_id
+        is_participant = user_id in (campaign.players or [])
 
-        if not (is_player or is_creator):
+        if not (is_player or is_creator or is_participant):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Access denied"
             )
 
-        return game.get_game_info()
+        # ✅ Используем подробный метод
+        game_info = game.get_detailed_game_info()
+        return GameDetailResponse(**game_info)
 
     except HTTPException:
         raise
@@ -189,7 +249,7 @@ async def get_game(
         )
 
 
-@router.put("/{game_id}")
+@router.put("/{game_id}", response_model=GameDetailResponse)
 async def update_game(
         game_id: str,
         update_data: GameUpdate,
@@ -208,7 +268,7 @@ async def update_game(
                 detail="Game not found"
             )
 
-        # Проверяем права (только создатель кампании)
+        # Проверяем права (только создатель кампании может обновлять игру)
         campaign_query = select(Campaign).where(Campaign.id == game.campaign_id)
         campaign_result = await db.execute(campaign_query)
         campaign = campaign_result.scalar_one()
@@ -216,7 +276,7 @@ async def update_game(
         if str(campaign.creator_id) != str(current_user.id):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Only campaign creator can update games"
+                detail="Only campaign creator can update game"
             )
 
         # Обновляем игру
@@ -228,9 +288,10 @@ async def update_game(
         await db.commit()
         await db.refresh(game)
 
-        logger.info(f"Game updated: {game.name}")
+        logger.info(f"Game updated: {game.name} by {current_user.username}")
 
-        return game.get_game_info()
+        game_info = game.get_detailed_game_info()
+        return GameDetailResponse(**game_info)
 
     except HTTPException:
         raise
@@ -246,7 +307,7 @@ async def update_game(
 @router.post("/{game_id}/join")
 async def join_game(
         game_id: str,
-        character_id: Optional[str] = None,
+        join_data: JoinGameData = JoinGameData(),
         current_user: User = Depends(get_current_user),
         db: AsyncSession = Depends(get_db_session)
 ):
@@ -262,25 +323,39 @@ async def join_game(
                 detail="Game not found"
             )
 
+        # Проверяем можно ли присоединиться
         if not game.can_join():
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Cannot join this game"
+                detail="Cannot join game: game is full or not accepting players"
             )
 
         user_id = str(current_user.id)
 
-        if not game.add_player(user_id, character_id):
+        # Проверяем что пользователь участник кампании
+        campaign_query = select(Campaign).where(Campaign.id == game.campaign_id)
+        campaign_result = await db.execute(campaign_query)
+        campaign = campaign_result.scalar_one()
+
+        is_creator = str(campaign.creator_id) == user_id
+        is_participant = user_id in (campaign.players or [])
+
+        if not (is_creator or is_participant):
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Failed to join game (already joined or game full)"
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only campaign participants can join the game"
             )
 
-        await db.commit()
-
-        logger.info(f"User {current_user.username} joined game {game.name}")
-
-        return {"message": "Successfully joined game", "game": game.get_game_info()}
+        # Добавляем игрока
+        if game.add_player(user_id, join_data.character_id):
+            await db.commit()
+            logger.info(f"User {current_user.username} joined game {game.name}")
+            return {"message": "Successfully joined game"}
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Already in game or game is full"
+            )
 
     except HTTPException:
         raise
@@ -313,17 +388,15 @@ async def leave_game(
 
         user_id = str(current_user.id)
 
-        if not game.remove_player(user_id):
+        if game.remove_player(user_id):
+            await db.commit()
+            logger.info(f"User {current_user.username} left game {game.name}")
+            return {"message": "Successfully left game"}
+        else:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="You are not in this game"
+                detail="Not in this game"
             )
-
-        await db.commit()
-
-        logger.info(f"User {current_user.username} left game {game.name}")
-
-        return {"message": "Successfully left game"}
 
     except HTTPException:
         raise
@@ -333,4 +406,378 @@ async def leave_game(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to leave game"
+        )
+
+
+@router.post("/{game_id}/start")
+async def start_game(
+        game_id: str,
+        current_user: User = Depends(get_current_user),
+        db: AsyncSession = Depends(get_db_session)
+):
+    """Начать игровую сессию"""
+    try:
+        query = select(Game).where(Game.id == game_id)
+        result = await db.execute(query)
+        game = result.scalar_one_or_none()
+
+        if not game:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Game not found"
+            )
+
+        # Проверяем права (только создатель кампании может начать игру)
+        campaign_query = select(Campaign).where(Campaign.id == game.campaign_id)
+        campaign_result = await db.execute(campaign_query)
+        campaign = campaign_result.scalar_one()
+
+        if str(campaign.creator_id) != str(current_user.id):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only campaign creator can start the game"
+            )
+
+        if game.start_game():
+            await db.commit()
+            logger.info(f"Game started: {game.name} by {current_user.username}")
+            return {"message": "Game started successfully"}
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot start game: no players or game not in waiting status"
+            )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error starting game {game_id}: {e}")
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to start game"
+        )
+
+
+@router.post("/{game_id}/pause")
+async def pause_game(
+        game_id: str,
+        current_user: User = Depends(get_current_user),
+        db: AsyncSession = Depends(get_db_session)
+):
+    """Приостановить игру"""
+    try:
+        query = select(Game).where(Game.id == game_id)
+        result = await db.execute(query)
+        game = result.scalar_one_or_none()
+
+        if not game:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Game not found"
+            )
+
+        # Проверяем права
+        campaign_query = select(Campaign).where(Campaign.id == game.campaign_id)
+        campaign_result = await db.execute(campaign_query)
+        campaign = campaign_result.scalar_one()
+
+        if str(campaign.creator_id) != str(current_user.id):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only campaign creator can pause the game"
+            )
+
+        if game.pause_game():
+            await db.commit()
+            logger.info(f"Game paused: {game.name} by {current_user.username}")
+            return {"message": "Game paused successfully"}
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot pause game: game not active"
+            )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error pausing game {game_id}: {e}")
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to pause game"
+        )
+
+
+@router.post("/{game_id}/end")
+async def end_game(
+        game_id: str,
+        current_user: User = Depends(get_current_user),
+        db: AsyncSession = Depends(get_db_session)
+):
+    """Завершить игру"""
+    try:
+        query = select(Game).where(Game.id == game_id)
+        result = await db.execute(query)
+        game = result.scalar_one_or_none()
+
+        if not game:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Game not found"
+            )
+
+        # Проверяем права
+        campaign_query = select(Campaign).where(Campaign.id == game.campaign_id)
+        campaign_result = await db.execute(campaign_query)
+        campaign = campaign_result.scalar_one()
+
+        if str(campaign.creator_id) != str(current_user.id):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only campaign creator can end the game"
+            )
+
+        if game.end_game():
+            await db.commit()
+            logger.info(f"Game ended: {game.name} by {current_user.username}")
+            return {"message": "Game ended successfully"}
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot end game: game not active or paused"
+            )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error ending game {game_id}: {e}")
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to end game"
+        )
+
+
+# ✅ ДОПОЛНИТЕЛЬНЫЕ ENDPOINTS ДЛЯ УПРАВЛЕНИЯ ИГРОЙ
+
+@router.get("/{game_id}/players")
+async def get_game_players(
+        game_id: str,
+        current_user: User = Depends(get_current_user),
+        db: AsyncSession = Depends(get_db_session)
+):
+    """Получить список игроков в игре"""
+    try:
+        query = select(Game).where(Game.id == game_id)
+        result = await db.execute(query)
+        game = result.scalar_one_or_none()
+
+        if not game:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Game not found"
+            )
+
+        # Проверяем права доступа
+        campaign_query = select(Campaign).where(Campaign.id == game.campaign_id)
+        campaign_result = await db.execute(campaign_query)
+        campaign = campaign_result.scalar_one()
+
+        user_id = str(current_user.id)
+        is_player = user_id in (game.players or [])
+        is_creator = str(campaign.creator_id) == user_id
+        is_participant = user_id in (campaign.players or [])
+
+        if not (is_player or is_creator or is_participant):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied"
+            )
+
+        return {
+            "game_id": str(game.id),
+            "players": game.players or [],
+            "characters": game.characters or [],
+            "current_players": game.current_players,
+            "max_players": game.max_players
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting game players {game_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to get game players"
+        )
+
+
+@router.post("/{game_id}/messages")
+async def send_game_message(
+        game_id: str,
+        message_data: dict,
+        current_user: User = Depends(get_current_user),
+        db: AsyncSession = Depends(get_db_session)
+):
+    """Отправить сообщение в игровой чат"""
+    try:
+        # Проверяем существование игры и права доступа
+        query = select(Game).where(Game.id == game_id)
+        result = await db.execute(query)
+        game = result.scalar_one_or_none()
+
+        if not game:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Game not found"
+            )
+
+        user_id = str(current_user.id)
+        if user_id not in (game.players or []):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only game players can send messages"
+            )
+
+        # Здесь можно добавить логику сохранения сообщения в Redis или БД
+        # Пока возвращаем подтверждение
+        return {
+            "message": "Message sent successfully",
+            "game_id": game_id,
+            "sender": current_user.username,
+            "content": message_data.get("content", "")
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error sending game message {game_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to send message"
+        )
+
+
+@router.get("/{game_id}/messages")
+async def get_game_messages(
+        game_id: str,
+        limit: int = 50,
+        offset: int = 0,
+        current_user: User = Depends(get_current_user),
+        db: AsyncSession = Depends(get_db_session)
+):
+    """Получить сообщения игрового чата"""
+    try:
+        # Проверяем существование игры и права доступа
+        query = select(Game).where(Game.id == game_id)
+        result = await db.execute(query)
+        game = result.scalar_one_or_none()
+
+        if not game:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Game not found"
+            )
+
+        user_id = str(current_user.id)
+        if user_id not in (game.players or []):
+            # Проверяем права кампании
+            campaign_query = select(Campaign).where(Campaign.id == game.campaign_id)
+            campaign_result = await db.execute(campaign_query)
+            campaign = campaign_result.scalar_one()
+
+            if str(campaign.creator_id) != user_id:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Access denied"
+                )
+
+        # Здесь можно добавить логику получения сообщений из Redis или БД
+        # Пока возвращаем пустой список
+        return {
+            "game_id": game_id,
+            "messages": [],
+            "total": 0,
+            "limit": limit,
+            "offset": offset
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting game messages {game_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to get messages"
+        )
+
+
+@router.post("/{game_id}/roll")
+async def roll_dice(
+        game_id: str,
+        roll_data: dict,
+        current_user: User = Depends(get_current_user),
+        db: AsyncSession = Depends(get_db_session)
+):
+    """Бросить кости в игре"""
+    try:
+        # Проверяем существование игры и права доступа
+        query = select(Game).where(Game.id == game_id)
+        result = await db.execute(query)
+        game = result.scalar_one_or_none()
+
+        if not game:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Game not found"
+            )
+
+        user_id = str(current_user.id)
+        if user_id not in (game.players or []):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only game players can roll dice"
+            )
+
+        # Простая логика броска костей (можно расширить)
+        import random
+
+        notation = roll_data.get("notation", "1d20")
+        purpose = roll_data.get("purpose", "")
+
+        # Парсим нотацию (упрощенно)
+        if "d" in notation:
+            parts = notation.split("d")
+            num_dice = int(parts[0]) if parts[0] else 1
+            die_size = int(parts[1])
+
+            rolls = [random.randint(1, die_size) for _ in range(num_dice)]
+            total = sum(rolls)
+
+            # Обновляем счетчик бросков
+            game.dice_rolls_count += 1
+            await db.commit()
+
+            return {
+                "notation": notation,
+                "purpose": purpose,
+                "rolls": rolls,
+                "total": total,
+                "player": current_user.username,
+                "timestamp": "now"  # В реальности использовать datetime
+            }
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid dice notation"
+            )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error rolling dice in game {game_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to roll dice"
         )
