@@ -44,8 +44,9 @@ const GamePage: React.FC = () => {
     } = useGameData();
 
     const {
-        connectToGame,
-        disconnectFromGame,
+        loadGame,
+        leaveGame,
+        clearGame,
     } = useGameActions();
 
     const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -79,7 +80,7 @@ const GamePage: React.FC = () => {
     // Обработка выхода из игры
     const handleLeaveGame = async () => {
         if (confirm('Вы уверены, что хотите покинуть игру?')) {
-            await disconnectFromGame();
+            await leaveGame();
             navigate('/campaigns');
         }
     };
@@ -129,7 +130,7 @@ const GamePage: React.FC = () => {
                                 Вернуться к кампаниям
                             </Button>
                             {gameId && (
-                                <Button onClick={() => connectToGame(gameId)} variant="primary">
+                                <Button onClick={() => loadGame(gameId)} variant="primary">
                                     Попробовать снова
                                 </Button>
                             )}

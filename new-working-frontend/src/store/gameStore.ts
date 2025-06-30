@@ -86,7 +86,10 @@ export const useGameStore = create<GameState>()(
             try {
                 // Получаем информацию об игре
                 const game = await gameService.getGame(gameId);
-                set({ currentGame: game });
+                set({
+                    currentGame: game,
+                    isConnecting: false, // ✅ Сбрасываем флаг загрузки
+                });
 
                 // Подключаемся к игре
                 await get().connectToGame(gameId);
@@ -95,7 +98,9 @@ export const useGameStore = create<GameState>()(
                 set({
                     connectionError: error.message || 'Не удалось загрузить игру',
                     isConnecting: false,
+                    currentGame: null, // ✅ Очищаем игру при ошибке
                 });
+                throw error; // ✅ Пробрасываем ошибку дальше
             }
         },
 
@@ -130,6 +135,8 @@ export const useGameStore = create<GameState>()(
 
         // Connect to game
         connectToGame: async (gameId: string) => {
+            const { currentGame } = get(); // ✅ Получаем текущее состояние
+
             set({ isConnecting: true, connectionError: null });
 
             try {
@@ -146,6 +153,16 @@ export const useGameStore = create<GameState>()(
                         players: players,
                         activePlayers: players.filter((p: GamePlayer) => p.is_online),
                     });
+
+                    // ✅ Если игра не загружена, но WebSocket подключился, попробуем загрузить игру
+                    if (!currentGame && gameId) {
+                        console.log('Game not loaded, attempting to load...');
+                        gameService.getGame(gameId).then(game => {
+                            set({ currentGame: game });
+                        }).catch(error => {
+                            console.error('Failed to load game after WebSocket connection:', error);
+                        });
+                    }
                 });
 
                 websocketService.on('player_joined', (data) => {
@@ -413,6 +430,8 @@ export const useGameActions = () => {
         nextTurn: store.nextTurn,
         selectCharacter: store.selectCharacter,
         updateCharacter: store.updateCharacter,
+        sendMessage: store.sendMessage,
+        sendAction: store.sendAction,
     };
 };
 

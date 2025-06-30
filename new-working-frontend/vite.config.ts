@@ -26,10 +26,10 @@ export default defineConfig({
         changeOrigin: true,
         secure: false,
       },
-      '/ws': {
-        target: 'ws://192.168.4.55:8000',
-        ws: true,
-      },
+      // '/ws': {
+      //   target: 'ws://192.168.4.55:8000',
+      //   ws: true,
+      // },
     },
   },
   build: {
