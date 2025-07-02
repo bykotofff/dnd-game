@@ -111,46 +111,212 @@ const GamePage = () => {
     const [isLoadingGame, setIsLoadingGame] = useState(false);
     const [loadError, setLoadError] = useState(null);
 
-    // Загрузка игры при монтировании
+    // Локальные состояния для fallback если gameStore не работает
+    const [localMessages, setLocalMessages] = useState([]);
+    const [localPlayers, setLocalPlayers] = useState([]);
+
+    // Используем локальные состояния как fallback
+    const actualMessages = messages && messages.length > 0 ? messages : localMessages;
+    const actualPlayers = players && players.length > 0 ? players : localPlayers;
+
+    // Загрузка игры при монтировании - упрощенный подход
     useEffect(() => {
-        const loadGameData = async () => {
+        const initializeGame = async () => {
             if (!gameId || !user) return;
 
             setIsLoadingGame(true);
             setLoadError(null);
 
             try {
-                console.log('Loading game data:', gameId);
-                await loadGame(gameId);
+                console.log('Initializing game:', gameId);
+
+                // Пропускаем загрузку через API - используем только WebSocket
+                // Создаем минимальную структуру игры
+                const gameData = {
+                    id: gameId,
+                    name: 'Игровая сессия',
+                    status: 'active'
+                };
+
+                // Устанавливаем игру в store если есть setCurrentGame
+                if (setCurrentGame) {
+                    setCurrentGame(gameData);
+                }
+
                 setIsLoadingGame(false);
+
             } catch (error) {
-                console.error('Failed to load game:', error);
-                setLoadError(error.message || 'Не удалось загрузить игру');
+                console.error('Failed to initialize game:', error);
+                setLoadError(error.message || 'Не удалось инициализировать игру');
                 setIsLoadingGame(false);
             }
         };
 
-        loadGameData();
-    }, [gameId, user, loadGame]);
+        initializeGame();
+    }, [gameId, user, setCurrentGame]);
 
     // Автоматическое подключение к WebSocket
     useEffect(() => {
-        if (currentGame && gameId && !isConnected && !isConnecting && !loadError) {
-            console.log('Connecting to game WebSocket:', gameId);
-            connectToGame(gameId).catch((error) => {
-                console.error('Failed to connect to game:', error);
+        if (gameId && user && !loadError) {
+            console.log('Setting up WebSocket connection for game:', gameId);
+
+            // Настраиваем обработчики WebSocket событий ЗАРАНЕЕ
+            websocketService.on('connected', (data) => {
+                console.log('WebSocket connected:', data);
+                setLoadError(null); // Очищаем ошибки при успешном подключении
+
+                // Обновляем данные игры из WebSocket ответа
+                if (data.game_id) {
+                    const gameData = {
+                        id: data.game_id,
+                        name: data.game_name || 'Игровая сессия',
+                        status: 'active'
+                    };
+
+                    if (setCurrentGame) {
+                        setCurrentGame(gameData);
+                    }
+                }
+
+                // Обновляем список игроков если есть
+                if (data.players_online && Array.isArray(data.players_online)) {
+                    setLocalPlayers(data.players_online);
+                }
             });
+
+            websocketService.on('message_history', (data) => {
+                console.log('Received message history:', data);
+                if (data.messages && Array.isArray(data.messages)) {
+                    // Преобразуем историю сообщений в нужный формат
+                    const formattedMessages = data.messages.map((msg, index) => ({
+                        id: msg.id || `history-${index}`,
+                        type: msg.type || 'chat',
+                        content: msg.content,
+                        sender: msg.sender_name || msg.sender || 'Неизвестный',
+                        timestamp: msg.timestamp || new Date().toISOString()
+                    }));
+                    setLocalMessages(formattedMessages);
+                }
+            });
+
+            websocketService.on('error', (data) => {
+                console.error('WebSocket error:', data);
+                setLoadError('Ошибка WebSocket: ' + (data.message || 'Неизвестная ошибка'));
+            });
+
+            websocketService.on('disconnected', () => {
+                console.log('WebSocket disconnected');
+                // Не показываем ошибку сразу - может быть временное отключение
+                setTimeout(() => {
+                    if (!websocketService.isConnected()) {
+                        setLoadError('Соединение с сервером потеряно');
+                    }
+                }, 3000);
+            });
+
+            websocketService.on('chat_message', (data) => {
+                console.log('Received chat message:', data);
+                const newMessage = {
+                    id: Date.now().toString(),
+                    type: 'chat',
+                    content: data.content,
+                    sender: data.sender_name || data.sender_id,
+                    timestamp: data.timestamp
+                };
+                setLocalMessages(prev => [...prev, newMessage]);
+            });
+
+            websocketService.on('player_action', (data) => {
+                console.log('Received player action:', data);
+                const newMessage = {
+                    id: Date.now().toString(),
+                    type: 'action',
+                    content: data.action,
+                    sender: data.player_name || data.player_id,
+                    timestamp: data.timestamp
+                };
+                setLocalMessages(prev => [...prev, newMessage]);
+            });
+
+            websocketService.on('dice_roll', (data) => {
+                console.log('Received dice roll:', data);
+                const newMessage = {
+                    id: Date.now().toString(),
+                    type: 'dice_roll',
+                    content: `🎲 ${data.notation}: ${data.result}`,
+                    sender: data.player_name || data.player_id,
+                    timestamp: data.timestamp
+                };
+                setLocalMessages(prev => [...prev, newMessage]);
+            });
+
+            websocketService.on('ai_response', (data) => {
+                console.log('Received AI response:', data);
+                const newMessage = {
+                    id: Date.now().toString(),
+                    type: 'ai_dm',
+                    content: data.message,
+                    sender: 'ИИ Мастер',
+                    timestamp: data.timestamp || new Date().toISOString()
+                };
+                setLocalMessages(prev => [...prev, newMessage]);
+            });
+
+            websocketService.on('player_joined', (data) => {
+                console.log('Player joined:', data);
+                if (data.players_online && Array.isArray(data.players_online)) {
+                    setLocalPlayers(data.players_online);
+                }
+            });
+
+            websocketService.on('player_left', (data) => {
+                console.log('Player left:', data);
+                if (data.players_online && Array.isArray(data.players_online)) {
+                    setLocalPlayers(data.players_online);
+                }
+            });
+
+            // Подключаемся только если не подключены
+            if (!websocketService.isConnected() && !websocketService.isConnecting()) {
+                console.log('Starting WebSocket connection...');
+
+                // Добавляем отладочную информацию
+                websocketService.debugTokenInfo();
+                websocketService.debugConnectionInfo();
+
+                websocketService.connect(gameId).then(() => {
+                    console.log('WebSocket connection successful');
+                }).catch((error) => {
+                    console.error('Failed to connect to game:', error);
+                    // Не устанавливаем ошибку сразу - переподключение может сработать
+                    setTimeout(() => {
+                        if (!websocketService.isConnected()) {
+                            setLoadError('Не удалось подключиться к игре: ' + error.message);
+                        }
+                    }, 5000);
+                });
+            }
         }
-    }, [currentGame, gameId, isConnected, isConnecting, connectToGame, loadError]);
+
+        // Cleanup function - удаляем обработчики при изменении gameId
+        return () => {
+            if (gameId) {
+                console.log('Cleaning up WebSocket handlers for game:', gameId);
+                websocketService.removeAllListeners();
+            }
+        };
+    }, [gameId, user]); // Убрали loadError из зависимостей
 
     // Очистка при размонтировании
     useEffect(() => {
         return () => {
-            if (isConnected) {
-                disconnectFromGame();
+            // Очищаем WebSocket обработчики и отключаемся
+            websocketService.removeAllListeners();
+            if (websocketService.isConnected()) {
+                websocketService.disconnect();
             }
         };
-    }, [isConnected, disconnectFromGame]);
+    }, []);
 
     // Обработчики событий - теперь используют реальные сервисы
     const handleActionSubmit = async () => {
@@ -158,17 +324,24 @@ const GamePage = () => {
 
         try {
             // Отправляем действие через WebSocket для немедленного отображения
-            await sendAction(actionInput.trim());
+            const success = websocketService.sendPlayerAction(actionInput.trim());
+            if (!success) {
+                throw new Error('WebSocket не подключен');
+            }
 
-            // Также отправляем на backend для обработки ИИ
-            await gameService.getAiResponse(gameId, actionInput.trim(), {
+            // Также отправляем на backend для обработки ИИ (асинхронно)
+            gameService.getAiResponse(gameId, actionInput.trim(), {
                 current_scene: currentScene?.description,
                 players: players?.length || 0
+            }).catch(error => {
+                console.error('AI response failed:', error);
+                // Не показываем ошибку пользователю - ИИ может ответить позже
             });
 
             setActionInput('');
         } catch (error) {
             console.error('Failed to send action:', error);
+            setLoadError('Не удалось отправить действие: ' + error.message);
         }
     };
 
@@ -176,7 +349,10 @@ const GamePage = () => {
         if (!chatInput.trim()) return;
 
         try {
-            await sendMessage(chatInput.trim(), false);
+            const success = websocketService.sendChatMessage(chatInput.trim(), false);
+            if (!success) {
+                throw new Error('WebSocket не подключен');
+            }
             setChatInput('');
         } catch (error) {
             console.error('Failed to send chat message:', error);
@@ -188,31 +364,39 @@ const GamePage = () => {
 
         try {
             const notation = selectedDice + (diceModifier !== 0 ? (diceModifier > 0 ? '+' + diceModifier : diceModifier) : '');
-            await gameService.rollDice(gameId, notation, 'manual_roll');
+            const success = websocketService.sendDiceRoll(notation, 'manual_roll');
+            if (!success) {
+                // Fallback to API if WebSocket fails
+                await gameService.rollDice(gameId, notation, 'manual_roll');
+            }
         } catch (error) {
             console.error('Failed to roll dice:', error);
         }
     };
 
     const handleLeaveGame = () => {
-        if (isConnected) {
-            disconnectFromGame();
+        websocketService.removeAllListeners();
+        if (websocketService.isConnected()) {
+            websocketService.disconnect();
         }
         navigate('/campaigns');
     };
 
     // Статус подключения
-    const connectionStatus = isConnected ? {
+    const wsConnected = websocketService.isConnected();
+    const wsConnecting = websocketService.isConnecting();
+
+    const connectionStatus = wsConnected ? {
         icon: CheckCircleIcon,
         text: 'Подключен',
         color: 'text-green-400'
-    } : isConnecting ? {
+    } : wsConnecting ? {
         icon: WifiIcon,
         text: 'Подключение...',
         color: 'text-yellow-400'
     } : {
         icon: ExclamationTriangleIcon,
-        text: 'Ошибка',
+        text: 'Отключен',
         color: 'text-red-400'
     };
 
@@ -282,7 +466,7 @@ const GamePage = () => {
                                     {currentGame?.name || 'Игровая сессия'}
                                 </h1>
                                 <p className="text-sm text-gray-500 dark:text-gray-400 truncate">
-                                    D&D 5e • {(playersOnline || players || []).length} игроков онлайн
+                                    D&D 5e • {(playersOnline || actualPlayers || []).length} игроков онлайн
                                 </p>
                             </div>
                         </div>
@@ -292,8 +476,8 @@ const GamePage = () => {
                             <div className="flex items-center space-x-2">
                                 <connectionStatus.icon className={`w-4 h-4 ${connectionStatus.color}`} />
                                 <span className={`text-sm ${connectionStatus.color}`}>
-                                    {connectionStatus.text}
-                                </span>
+                                        {connectionStatus.text}
+                                    </span>
                             </div>
 
                             {/* Кнопки управления */}
@@ -361,7 +545,7 @@ const GamePage = () => {
 
                         {/* Messages area */}
                         <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-gray-50 dark:bg-gray-900">
-                            {!messages || messages.length === 0 ? (
+                            {!actualMessages || actualMessages.length === 0 ? (
                                 <div className="flex items-center justify-center h-full">
                                     <div className="text-center">
                                         <div className="animate-spin rounded-full h-8 w-8 border-4 border-purple-500 border-t-transparent mx-auto mb-4"></div>
@@ -370,18 +554,18 @@ const GamePage = () => {
                                     </div>
                                 </div>
                             ) : (
-                                messages.map((message) => (
+                                actualMessages.map((message) => (
                                     <div
                                         key={message.id}
                                         className={`p-3 rounded-lg border ${getMessageStyle(message.type)} shadow-sm`}
                                     >
                                         <div className="flex items-center justify-between mb-1">
-                                            <span className="font-semibold text-sm">
-                                                {message.sender || message.sender_name || 'Неизвестный'}
-                                            </span>
+                                                <span className="font-semibold text-sm">
+                                                    {message.sender || message.sender_name || 'Неизвестный'}
+                                                </span>
                                             <span className="text-xs opacity-60">
-                                                {new Date(message.timestamp).toLocaleTimeString()}
-                                            </span>
+                                                    {new Date(message.timestamp).toLocaleTimeString()}
+                                                </span>
                                         </div>
                                         <p className="text-sm leading-relaxed">{message.content}</p>
                                     </div>
@@ -416,31 +600,31 @@ const GamePage = () => {
                                     Действия персонажа:
                                 </label>
                                 <div className="flex space-x-2">
-                                    <textarea
-                                        value={actionInput}
-                                        onChange={(e) => setActionInput(e.target.value)}
-                                        onKeyDown={(e) => {
-                                            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-                                                handleActionSubmit();
+                                        <textarea
+                                            value={actionInput}
+                                            onChange={(e) => setActionInput(e.target.value)}
+                                            onKeyDown={(e) => {
+                                                if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                                                    handleActionSubmit();
+                                                }
+                                            }}
+                                            placeholder={!wsConnected ?
+                                                "Отключено от сервера..." :
+                                                "Опишите что делает ваш персонаж... (Ctrl+Enter для отправки)"
                                             }
-                                        }}
-                                        placeholder={!isConnected ?
-                                            "Отключено от сервера..." :
-                                            "Опишите что делает ваш персонаж... (Ctrl+Enter для отправки)"
-                                        }
-                                        disabled={!isConnected}
-                                        className="flex-1 px-3 py-2 min-h-[100px] bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none disabled:opacity-50"
-                                        rows={4}
-                                    />
+                                            disabled={!wsConnected}
+                                            className="flex-1 px-3 py-2 min-h-[100px] bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none disabled:opacity-50"
+                                            rows={4}
+                                        />
                                     <Button
                                         onClick={handleActionSubmit}
-                                        disabled={!actionInput.trim() || !isConnected}
+                                        disabled={!actionInput.trim() || !wsConnected}
                                         className="px-4 py-2 h-fit"
                                     >
                                         <PaperAirplaneIcon className="w-5 h-5" />
                                     </Button>
                                 </div>
-                                {!isConnected && (
+                                {!wsConnected && (
                                     <p className="text-xs text-red-500 mt-1">Подключение к серверу потеряно</p>
                                 )}
                             </div>
@@ -471,8 +655,8 @@ const GamePage = () => {
                                             −
                                         </button>
                                         <span className="text-sm min-w-[2rem] text-center font-mono">
-                                            {diceModifier > 0 ? '+' : ''}{diceModifier}
-                                        </span>
+                                                {diceModifier > 0 ? '+' : ''}{diceModifier}
+                                            </span>
                                         <button
                                             onClick={() => setDiceModifier(Math.min(10, diceModifier + 1))}
                                             className="px-2 py-1 text-sm bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-200 rounded hover:bg-gray-300 dark:hover:bg-gray-500"
@@ -484,13 +668,13 @@ const GamePage = () => {
                                         onClick={handleDiceRoll}
                                         variant="secondary"
                                         size="sm"
-                                        disabled={!isConnected}
+                                        disabled={!wsConnected}
                                     >
                                         Бросить
                                     </Button>
                                 </div>
                                 <div className="text-sm text-gray-500 dark:text-gray-400">
-                                    {isConnected ? 'Готов к игре' : 'Отключено от сервера'}
+                                    {wsConnected ? 'Готов к игре' : 'Отключено от сервера'}
                                 </div>
                             </div>
                         </div>
@@ -507,21 +691,21 @@ const GamePage = () => {
                                 <div className="flex items-center">
                                     <UsersIcon className="w-5 h-5 mr-2" />
                                     <span className="font-semibold">
-                                        Игроки ({(players || []).filter(p => p.isOnline || p.is_online).length}/{(players || []).length})
-                                    </span>
+                                            Игроки ({(actualPlayers || []).filter(p => p.isOnline || p.is_online).length}/{(actualPlayers || []).length})
+                                        </span>
                                 </div>
                                 {playersCollapsed ? <ChevronDownIcon className="w-4 h-4" /> : <ChevronUpIcon className="w-4 h-4" />}
                             </button>
 
                             {!playersCollapsed && (
                                 <div className="px-3 pb-3 space-y-2">
-                                    {(!players || players.length === 0) ? (
+                                    {(!actualPlayers || actualPlayers.length === 0) ? (
                                         <div className="text-center text-gray-500 dark:text-gray-400 py-4">
                                             <UsersIcon className="w-8 h-8 mx-auto mb-2 opacity-50" />
                                             <p className="text-sm">Игроки подключаются...</p>
                                         </div>
                                     ) : (
-                                        players.map((player) => (
+                                        actualPlayers.map((player) => (
                                             <div
                                                 key={player.id || player.user_id}
                                                 className={`p-2 rounded-lg border ${
@@ -536,12 +720,12 @@ const GamePage = () => {
                                                             player.isOnline || player.is_online ? 'bg-green-500' : 'bg-gray-400'
                                                         }`} />
                                                         <span className="font-medium text-sm">
-                                                            {player.name || player.username || player.character_name}
-                                                        </span>
+                                                                {player.name || player.username || player.character_name}
+                                                            </span>
                                                         {(player.isCurrentTurn || player.is_current_turn) && (
                                                             <span className="px-1 py-0.5 text-xs bg-yellow-200 dark:bg-yellow-800 text-yellow-800 dark:text-yellow-200 rounded">
-                                                                Ход
-                                                            </span>
+                                                                    Ход
+                                                                </span>
                                                         )}
                                                     </div>
                                                     <div className="text-xs text-gray-500 dark:text-gray-400">
@@ -597,8 +781,8 @@ const GamePage = () => {
 
                             <div className="flex-1 overflow-y-auto p-3 space-y-2 bg-gray-50 dark:bg-gray-900 min-h-[200px]">
                                 {/* Фильтруем сообщения чата из общих сообщений */}
-                                {messages?.filter(msg => msg.type === 'chat' || msg.message_type === 'chat').length > 0 ? (
-                                    messages
+                                {actualMessages?.filter(msg => msg.type === 'chat' || msg.message_type === 'chat').length > 0 ? (
+                                    actualMessages
                                         .filter(msg => msg.type === 'chat' || msg.message_type === 'chat')
                                         .map((message) => (
                                             <div key={message.id} className="p-2 rounded bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700">
@@ -629,18 +813,18 @@ const GamePage = () => {
                                             }
                                         }}
                                         placeholder="Сообщение..."
-                                        disabled={!isConnected}
+                                        disabled={!wsConnected}
                                         className="flex-1 px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm disabled:opacity-50"
                                     />
                                     <Button
                                         onClick={handleChatSubmit}
-                                        disabled={!chatInput.trim() || !isConnected}
+                                        disabled={!chatInput.trim() || !wsConnected}
                                         size="sm"
                                     >
                                         <PaperAirplaneIcon className="w-4 h-4" />
                                     </Button>
                                 </div>
-                                {!isConnected && (
+                                {!wsConnected && (
                                     <p className="text-xs text-red-500 mt-1">Отключено от сервера</p>
                                 )}
                             </div>
