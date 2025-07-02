@@ -1,518 +1,275 @@
-import React, { useState, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
     PaperAirplaneIcon,
-    EyeSlashIcon,
-    EyeIcon,
+    FaceSmileIcon,
+    ChatBubbleLeftIcon,
     UserIcon,
     SparklesIcon,
-    ExclamationTriangleIcon,
-    ChatBubbleLeftRightIcon,
-    MicrophoneIcon,
-    SpeakerWaveIcon,
-    Cog6ToothIcon,
-    FaceSmileIcon,
-    CommandLineIcon
+    CubeIcon,
+    ExclamationTriangleIcon
 } from '@heroicons/react/24/outline';
+
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
-import { useGameChat, useGameUI, useGameActions } from '@/store/gameStore';
+import { useGameChat, useGameConnection } from '@/store/gameStore';
 import type { GameMessage } from '@/types';
 
 interface GameChatProps {
+    gameId: string;
     className?: string;
 }
 
-interface ChatCommand {
-    command: string;
-    description: string;
-    usage: string;
-    example: string;
-}
+const GameChat: React.FC<GameChatProps> = ({ gameId, className = '' }) => {
+    const {
+        messages,
+        chatInput,
+        isTyping,
+        sendMessage,
+        setChatInput,
+        setTyping
+    } = useGameChat();
 
-const CHAT_COMMANDS: ChatCommand[] = [
-    {
-        command: '/roll',
-        description: 'Roll dice',
-        usage: '/roll [dice] [purpose]',
-        example: '/roll 1d20+5 Attack Roll'
-    },
-    {
-        command: '/r',
-        description: 'Short roll command',
-        usage: '/r [dice]',
-        example: '/r 2d6+3'
-    },
-    {
-        command: '/action',
-        description: 'Perform an action',
-        usage: '/action [description]',
-        example: '/action draws sword and charges'
-    },
-    {
-        command: '/me',
-        description: 'Describe character action',
-        usage: '/me [action]',
-        example: '/me looks around nervously'
-    },
-    {
-        command: '/whisper',
-        description: 'Send private message',
-        usage: '/w [player] [message]',
-        example: '/w John I found a secret door'
-    },
-    {
-        command: '/ooc',
-        description: 'Out of character message',
-        usage: '/ooc [message]',
-        example: '/ooc Can we take a 5 minute break?'
-    }
-];
+    const { isConnected } = useGameConnection();
 
-// Emoji shortcuts
-const EMOJI_SHORTCUTS: { [key: string]: string } = {
-    ':d20:': '🎲',
-    ':sword:': '⚔️',
-    ':shield:': '🛡️',
-    ':fire:': '🔥',
-    ':lightning:': '⚡',
-    ':heart:': '❤️',
-    ':skull:': '💀',
-    ':magic:': '✨',
-    ':gold:': '💰',
-    ':potion:': '🧪',
-    ':bow:': '🏹',
-    ':dagger:': '🗡️',
-    ':crown:': '👑',
-    ':crystal:': '💎'
-};
-
-const GameChat: React.FC<GameChatProps> = ({ className = '' }) => {
-    const { messages, chatInput, sendMessage, sendAction, setChatInput } = useGameChat();
-    const { selectedCharacterId, playersOnline } = useGameUI();
-    const { rollDice } = useGameActions();
-
-    // Local state
-    const [showCommands, setShowCommands] = useState(false);
     const [showEmojis, setShowEmojis] = useState(false);
-    const [isTyping, setIsTyping] = useState(false);
-    const [filterOOC, setFilterOOC] = useState(false);
-    const [filterSystem, setFilterSystem] = useState(false);
-    const [soundEnabled, setSoundEnabled] = useState(true);
-
-    // Refs
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLInputElement>(null);
-    const chatContainerRef = useRef<HTMLDivElement>(null);
-    const soundRef = useRef<HTMLAudioElement | null>(null);
 
-    // Auto-scroll to bottom
-    const scrollToBottom = () => {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    };
-
+    // Автопрокрутка к новым сообщениям
     useEffect(() => {
-        scrollToBottom();
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [messages]);
 
-    // Initialize notification sound
+    // Фокус на input при подключении
     useEffect(() => {
-        soundRef.current = new Audio();
-        soundRef.current.volume = 0.3;
-
-        return () => {
-            if (soundRef.current) {
-                soundRef.current.pause();
-                soundRef.current = null;
-            }
-        };
-    }, []);
-
-    // Play notification sound for new messages
-    useEffect(() => {
-        if (messages.length > 0 && soundEnabled) {
-            const lastMessage = messages[messages.length - 1];
-            // Don't play sound for own messages or system messages
-            if (lastMessage.sender.type !== 'system' && soundRef.current) {
-                try {
-                    soundRef.current.currentTime = 0;
-                    soundRef.current.play().catch(() => {
-                        // Sound failed, continue silently
-                    });
-                } catch (error) {
-                    // Sound failed, continue silently
-                }
-            }
+        if (isConnected && inputRef.current) {
+            inputRef.current.focus();
         }
-    }, [messages, soundEnabled]);
+    }, [isConnected]);
 
-    // Filter messages
-    const filteredMessages = useMemo(() => {
-        return messages.filter(message => {
-            if (filterOOC && message.is_ooc) return false;
-            if (filterSystem && message.sender.type === 'system') return false;
-            return true;
-        });
-    }, [messages, filterOOC, filterSystem]);
-
-    // Process emoji shortcuts
-    const processEmojis = (text: string): string => {
-        let processed = text;
-        Object.entries(EMOJI_SHORTCUTS).forEach(([shortcut, emoji]) => {
-            processed = processed.replace(new RegExp(shortcut.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), emoji);
-        });
-        return processed;
-    };
-
-    // Parse and execute chat commands
-    const parseCommand = (input: string): boolean => {
-        const trimmed = input.trim();
-        if (!trimmed.startsWith('/')) return false;
-
-        const parts = trimmed.split(' ');
-        const command = parts[0].toLowerCase();
-        const args = parts.slice(1).join(' ');
-
-        switch (command) {
-            case '/roll':
-            case '/r':
-                handleRollCommand(args);
-                return true;
-
-            case '/action':
-            case '/me':
-                if (args) {
-                    sendAction(args);
-                }
-                return true;
-
-            case '/whisper':
-            case '/w':
-                handleWhisperCommand(args);
-                return true;
-
-            case '/ooc':
-                if (args) {
-                    sendMessage(args, true); // true = OOC
-                }
-                return true;
-
-            case '/clear':
-                // Could implement clear chat history
-                return true;
-
-            case '/help':
-                setShowCommands(true);
-                return true;
-
-            default:
-                return false;
-        }
-    };
-
-    const handleRollCommand = (args: string) => {
-        const parts = args.split(' ');
-        const notation = parts[0];
-        const purpose = parts.slice(1).join(' ');
-
-        if (notation) {
-            rollDice(notation, purpose || undefined);
-        }
-    };
-
-    const handleWhisperCommand = (args: string) => {
-        const firstSpace = args.indexOf(' ');
-        if (firstSpace === -1) return;
-
-        const target = args.substring(0, firstSpace);
-        const message = args.substring(firstSpace + 1);
-
-        if (target && message) {
-            // For now, just send as regular message with whisper prefix
-            sendMessage(`[Whisper to ${target}] ${message}`, false);
-        }
-    };
-
+    // Обработка отправки сообщения
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        if (!chatInput.trim()) return;
+        if (!chatInput.trim() || !isConnected) return;
 
-        const processedInput = processEmojis(chatInput);
-
-        // Try to parse as command first
-        if (!parseCommand(processedInput)) {
-            // Regular message
-            sendMessage(processedInput, false);
+        // Обработка команд
+        if (chatInput.startsWith('/')) {
+            handleChatCommand(chatInput);
+        } else {
+            sendMessage(chatInput, false);
         }
 
         setChatInput('');
-        setIsTyping(false);
-    };
-
-    const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const value = e.target.value;
-        setChatInput(value);
-
-        // Show typing indicator
-        if (value && !isTyping) {
-            setIsTyping(true);
-        } else if (!value && isTyping) {
-            setIsTyping(false);
-        }
-    };
-
-    const insertEmoji = (emoji: string) => {
-        const input = inputRef.current;
-        if (input) {
-            const start = input.selectionStart || 0;
-            const end = input.selectionEnd || 0;
-            const newValue = chatInput.slice(0, start) + emoji + chatInput.slice(end);
-            setChatInput(newValue);
-
-            // Focus back to input and set cursor position
-            setTimeout(() => {
-                input.focus();
-                input.setSelectionRange(start + emoji.length, start + emoji.length);
-            }, 0);
-        }
         setShowEmojis(false);
     };
 
-    const getMessageStyle = (message: GameMessage): string => {
-        const baseClass = 'chat-message p-3 rounded-lg mb-2 break-words';
+    // Обработка команд чата
+    const handleChatCommand = (command: string) => {
+        const [cmd, ...args] = command.slice(1).split(' ');
 
-        if (message.is_ooc) {
-            return `${baseClass} chat-message ooc bg-gray-50 dark:bg-gray-800 border-l-4 border-gray-400`;
-        }
-
-        switch (message.message_type) {
-            case 'action':
-                return `${baseClass} chat-message action bg-amber-50 dark:bg-amber-900/20 border-l-4 border-amber-400`;
-            case 'dice_roll':
-                return `${baseClass} chat-message dice bg-green-50 dark:bg-green-900/20 border-l-4 border-green-400`;
+        switch (cmd.toLowerCase()) {
+            case 'help':
+                showHelpMessage();
+                break;
+            case 'roll':
+                handleDiceRoll(args.join(' '));
+                break;
+            case 'ooc':
+                sendMessage(args.join(' '), true);
+                break;
+            case 'whisper':
+            case 'w':
+                handleWhisper(args);
+                break;
             default:
-                switch (message.sender.type) {
-                    case 'dm':
-                    case 'ai':
-                        return `${baseClass} chat-message dm bg-purple-50 dark:bg-purple-900/20 border-l-4 border-purple-400`;
-                    case 'system':
-                        return `${baseClass} chat-message system bg-gray-50 dark:bg-gray-800 border-l-4 border-gray-400`;
-                    default:
-                        return `${baseClass} chat-message player bg-blue-50 dark:bg-blue-900/20 border-l-4 border-blue-400`;
-                }
+                sendMessage(`Неизвестная команда: /${cmd}. Используйте /help для справки`, false);
         }
     };
 
-    const formatMessageContent = (content: string): string => {
-        // Process basic markdown-like formatting
-        let formatted = content
-            .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>') // **bold**
-            .replace(/\*(.*?)\*/g, '<em>$1</em>') // *italic*
-            .replace(/`(.*?)`/g, '<code class="bg-gray-200 dark:bg-gray-700 px-1 rounded">$1</code>'); // `code`
+    // Показ справки
+    const showHelpMessage = () => {
+        const helpText = `
+Доступные команды:
+/help - эта справка
+/roll [кости] - бросок костей (например: /roll 1d20+5)
+/ooc [сообщение] - сообщение вне игры
+/whisper [игрок] [сообщение] - личное сообщение
+        `.trim();
 
-        return formatted;
+        sendMessage(helpText, false);
     };
 
-    const formatTimestamp = (timestamp: string): string => {
-        const date = new Date(timestamp);
-        return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    // Обработка броска костей
+    const handleDiceRoll = (diceNotation: string) => {
+        if (!diceNotation.trim()) {
+            sendMessage('Укажите формулу броска, например: /roll 1d20+5', false);
+            return;
+        }
+
+        // Здесь будет логика броска костей через WebSocket
+        sendMessage(`🎲 Бросаю ${diceNotation}...`, false);
     };
+
+    // Обработка шёпота
+    const handleWhisper = (args: string[]) => {
+        if (args.length < 2) {
+            sendMessage('Использование: /whisper [игрок] [сообщение]', false);
+            return;
+        }
+
+        const target = args[0];
+        const message = args.slice(1).join(' ');
+        sendMessage(`👤 Шепчу ${target}: ${message}`, false);
+    };
+
+    // Обработка изменения ввода
+    const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        setChatInput(e.target.value);
+
+        // Индикатор печати
+        if (!isTyping && e.target.value.length > 0) {
+            setTyping(true);
+            setTimeout(() => setTyping(false), 3000);
+        }
+    };
+
+    // Добавление эмодзи
+    const handleEmojiSelect = (emoji: string) => {
+        setChatInput(prev => prev + emoji);
+        setShowEmojis(false);
+        inputRef.current?.focus();
+    };
+
+    // Получение типа сообщения для стилизации
+    const getMessageStyle = (message: GameMessage) => {
+        switch (message.type) {
+            case 'ai_dm':
+                return 'bg-purple-900/30 border-purple-700/50 text-purple-200';
+            case 'system':
+                return 'bg-blue-900/30 border-blue-700/50 text-blue-200';
+            case 'dice_roll':
+                return 'bg-green-900/30 border-green-700/50 text-green-200';
+            case 'ooc':
+                return 'bg-gray-700/50 border-gray-600/50 text-gray-300';
+            case 'action':
+                return 'bg-yellow-900/30 border-yellow-700/50 text-yellow-200';
+            default:
+                return 'bg-gray-800/70 border-gray-600/50 text-white'; // ИСПРАВЛЕНИЕ: убрана прозрачность
+        }
+    };
+
+    // Получение иконки для типа сообщения
+    const getMessageIcon = (message: GameMessage) => {
+        switch (message.type) {
+            case 'ai_dm':
+                return <SparklesIcon className="w-4 h-4 text-purple-400" />;
+            case 'system':
+                return <ExclamationTriangleIcon className="w-4 h-4 text-blue-400" />;
+            case 'dice_roll':
+                return <CubeIcon className="w-4 h-4 text-green-400" />;
+            case 'ooc':
+                return <ChatBubbleLeftIcon className="w-4 h-4 text-gray-400" />;
+            case 'action':
+                return <SparklesIcon className="w-4 h-4 text-yellow-400" />;
+            default:
+                return <UserIcon className="w-4 h-4 text-gray-400" />;
+        }
+    };
+
+    // Популярные эмодзи
+    const popularEmojis = ['😀', '😂', '😅', '😊', '😍', '🤔', '😱', '👍', '👎', '❤️', '🔥', '⚔️', '🛡️', '🏹', '🧙‍♂️', '🐉'];
 
     return (
-        <Card className={`flex flex-col h-full ${className}`}>
-            <CardHeader className="flex flex-row items-center justify-between pb-3 border-b border-gray-200 dark:border-gray-700">
-                <CardTitle className="flex items-center gap-2">
-                    <ChatBubbleLeftRightIcon className="h-5 w-5" />
-                    Game Chat
-                    {playersOnline.length > 0 && (
-                        <span className="text-sm font-normal text-gray-500">
-                            ({playersOnline.length} online)
-                        </span>
-                    )}
+        <Card className={`flex flex-col ${className}`}>
+            <CardHeader className="pb-3 border-b border-gray-700">
+                <CardTitle className="text-lg font-medium text-white flex items-center">
+                    <ChatBubbleLeftIcon className="w-5 h-5 mr-2" />
+                    Чат игры
+                    <div className="ml-auto text-xs text-gray-400">
+                        {isConnected ? '🟢 Онлайн' : '🔴 Оффлайн'}
+                    </div>
                 </CardTitle>
-
-                <div className="flex items-center gap-1">
-                    {/* Filter buttons */}
-                    <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setFilterOOC(!filterOOC)}
-                        className={`h-8 w-8 p-0 ${filterOOC ? 'bg-gray-200 dark:bg-gray-700' : ''}`}
-                        title="Filter OOC messages"
-                    >
-                        {filterOOC ? <EyeSlashIcon className="h-4 w-4" /> : <EyeIcon className="h-4 w-4" />}
-                    </Button>
-
-                    <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setSoundEnabled(!soundEnabled)}
-                        className={`h-8 w-8 p-0 ${!soundEnabled ? 'bg-gray-200 dark:bg-gray-700' : ''}`}
-                        title="Toggle sound notifications"
-                    >
-                        {soundEnabled ? <SpeakerWaveIcon className="h-4 w-4" /> : <MicrophoneIcon className="h-4 w-4" />}
-                    </Button>
-
-                    <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setShowCommands(!showCommands)}
-                        className="h-8 w-8 p-0"
-                        title="Show chat commands"
-                    >
-                        <CommandLineIcon className="h-4 w-4" />
-                    </Button>
-                </div>
             </CardHeader>
 
-            <CardContent className="flex-1 flex flex-col p-0 overflow-hidden">
-                {/* Chat Commands Panel */}
-                <AnimatePresence>
-                    {showCommands && (
-                        <motion.div
-                            initial={{ opacity: 0, height: 0 }}
-                            animate={{ opacity: 1, height: 'auto' }}
-                            exit={{ opacity: 0, height: 0 }}
-                            className="border-b border-gray-200 dark:border-gray-700 p-3 bg-gray-50 dark:bg-gray-800"
-                        >
-                            <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                                Chat Commands
-                            </h4>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-                                {CHAT_COMMANDS.map((cmd) => (
-                                    <div key={cmd.command} className="space-y-1">
-                                        <div className="font-mono font-bold text-blue-600 dark:text-blue-400">
-                                            {cmd.command}
-                                        </div>
-                                        <div className="text-gray-600 dark:text-gray-400">
-                                            {cmd.description}
-                                        </div>
-                                        <div className="font-mono text-gray-500 dark:text-gray-500">
-                                            {cmd.example}
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        </motion.div>
-                    )}
-                </AnimatePresence>
-
-                {/* Messages Area */}
-                <div
-                    ref={chatContainerRef}
-                    className="flex-1 overflow-y-auto p-4 space-y-2"
-                    style={{ maxHeight: 'calc(100vh - 300px)' }}
-                >
+            <CardContent className="flex-1 flex flex-col p-0">
+                {/* Messages area */}
+                <div className="flex-1 overflow-y-auto p-3 space-y-3 min-h-0">
                     <AnimatePresence initial={false}>
-                        {filteredMessages.map((message, index) => (
+                        {messages.map((message, index) => (
                             <motion.div
                                 key={`${message.id}-${index}`}
-                                initial={{ opacity: 0, y: 10 }}
+                                initial={{ opacity: 0, y: 20 }}
                                 animate={{ opacity: 1, y: 0 }}
-                                exit={{ opacity: 0, y: -10 }}
-                                transition={{ duration: 0.2 }}
-                                className={getMessageStyle(message)}
+                                exit={{ opacity: 0, y: -20 }}
+                                className={`rounded-lg p-3 border ${getMessageStyle(message)}`} // ИСПРАВЛЕНИЕ: убрана лишняя прозрачность
                             >
-                                {/* Message Header */}
-                                <div className="flex items-center justify-between mb-1">
-                                    <div className="flex items-center gap-2">
-                                        {/* Sender Icon */}
-                                        {message.sender.type === 'ai' || message.sender.type === 'dm' ? (
-                                            <SparklesIcon className="h-4 w-4 text-purple-500" />
-                                        ) : message.sender.type === 'system' ? (
-                                            <ExclamationTriangleIcon className="h-4 w-4 text-gray-500" />
-                                        ) : (
-                                            <UserIcon className="h-4 w-4 text-blue-500" />
-                                        )}
-
-                                        {/* Sender Name */}
-                                        <span className="font-medium text-sm text-gray-700 dark:text-gray-300">
-                                            {message.sender.name || 'Unknown'}
-                                        </span>
-
-                                        {/* Message Type Badge */}
-                                        {message.message_type === 'action' && (
-                                            <span className="text-xs bg-amber-200 dark:bg-amber-800 px-2 py-0.5 rounded-full">
-                                                Action
+                                <div className="flex items-start space-x-2">
+                                    {getMessageIcon(message)}
+                                    <div className="flex-1 min-w-0">
+                                        <div className="flex items-center space-x-2 mb-1">
+                                            <span className="font-medium text-sm">
+                                                {message.sender}
                                             </span>
-                                        )}
-                                        {message.message_type === 'dice_roll' && (
-                                            <span className="text-xs bg-green-200 dark:bg-green-800 px-2 py-0.5 rounded-full">
-                                                🎲 Roll
+                                            <span className="text-xs opacity-60">
+                                                {new Date(message.timestamp).toLocaleTimeString()}
                                             </span>
-                                        )}
-                                        {message.is_ooc && (
-                                            <span className="text-xs bg-gray-200 dark:bg-gray-700 px-2 py-0.5 rounded-full">
-                                                OOC
-                                            </span>
-                                        )}
-                                        {message.is_whisper && (
-                                            <span className="text-xs bg-purple-200 dark:bg-purple-800 px-2 py-0.5 rounded-full">
-                                                Whisper
-                                            </span>
+                                            {message.type === 'ooc' && (
+                                                <span className="text-xs bg-gray-600 px-1 rounded text-gray-300">
+                                                    OOC
+                                                </span>
+                                            )}
+                                        </div>
+                                        <div className="text-sm break-words">
+                                            {message.content}
+                                        </div>
+                                        {message.dice_roll && (
+                                            <div className="mt-2 p-2 bg-black/20 rounded text-xs">
+                                                🎲 {message.dice_roll.notation}:
+                                                <span className="font-bold ml-1">
+                                                    {message.dice_roll.total}
+                                                </span>
+                                                {message.dice_roll.individual_rolls?.length > 1 && (
+                                                    <span className="ml-1 opacity-60">
+                                                        ({message.dice_roll.individual_rolls.join(', ')})
+                                                    </span>
+                                                )}
+                                            </div>
                                         )}
                                     </div>
-
-                                    {/* Timestamp */}
-                                    <span className="text-xs text-gray-500 dark:text-gray-400">
-                                        {formatTimestamp(message.timestamp)}
-                                    </span>
                                 </div>
-
-                                {/* Message Content */}
-                                <div
-                                    className="text-gray-900 dark:text-white"
-                                    dangerouslySetInnerHTML={{ __html: formatMessageContent(message.content) }}
-                                />
-
-                                {/* Dice Roll Data */}
-                                {message.dice_data && (
-                                    <div className="mt-2 p-2 bg-white dark:bg-gray-900 rounded border text-sm">
-                                        <div className="font-mono">
-                                            {message.dice_data.notation} = <span className="font-bold">{message.dice_data.result}</span>
-                                            {message.dice_data.is_critical && <span className="text-yellow-500 ml-1">⭐ CRITICAL!</span>}
-                                        </div>
-                                        <div className="text-xs text-gray-600 dark:text-gray-400 mt-1">
-                                            Individual rolls: [{message.dice_data.individual_rolls.join(', ')}]
-                                            {message.dice_data.purpose && ` • ${message.dice_data.purpose}`}
-                                        </div>
-                                    </div>
-                                )}
                             </motion.div>
                         ))}
                     </AnimatePresence>
 
-                    {/* Typing indicator */}
-                    {isTyping && (
-                        <motion.div
-                            initial={{ opacity: 0 }}
-                            animate={{ opacity: 1 }}
-                            className="text-xs text-gray-500 dark:text-gray-400 italic"
-                        >
-                            You are typing...
-                        </motion.div>
+                    {/* Placeholder when no messages */}
+                    {messages.length === 0 && (
+                        <div className="text-center text-gray-500 py-8">
+                            <ChatBubbleLeftIcon className="w-12 h-12 mx-auto mb-3 opacity-50" />
+                            <p>Сообщений пока нет</p>
+                            <p className="text-sm mt-1">Начните общение!</p>
+                        </div>
                     )}
 
-                    {/* Auto-scroll anchor */}
                     <div ref={messagesEndRef} />
                 </div>
 
-                {/* Emoji Panel */}
+                {/* Emoji picker */}
                 <AnimatePresence>
                     {showEmojis && (
                         <motion.div
                             initial={{ opacity: 0, height: 0 }}
                             animate={{ opacity: 1, height: 'auto' }}
                             exit={{ opacity: 0, height: 0 }}
-                            className="border-t border-gray-200 dark:border-gray-700 p-3 bg-gray-50 dark:bg-gray-800"
+                            className="border-t border-gray-700 p-3"
                         >
                             <div className="grid grid-cols-8 gap-2">
-                                {Object.values(EMOJI_SHORTCUTS).map((emoji, index) => (
+                                {popularEmojis.map((emoji, index) => (
                                     <button
                                         key={index}
-                                        onClick={() => insertEmoji(emoji)}
-                                        className="text-xl hover:bg-gray-200 dark:hover:bg-gray-700 rounded p-1 transition-colors"
+                                        onClick={() => handleEmojiSelect(emoji)}
+                                        className="text-lg hover:bg-gray-700 rounded p-1 transition-colors"
                                     >
                                         {emoji}
                                     </button>
@@ -523,14 +280,14 @@ const GameChat: React.FC<GameChatProps> = ({ className = '' }) => {
                 </AnimatePresence>
 
                 {/* Input Area */}
-                <div className="border-t border-gray-200 dark:border-gray-700 p-3">
+                <div className="border-t border-gray-700 p-3">
                     <form onSubmit={handleSubmit} className="flex items-center gap-2">
                         <Button
                             type="button"
                             variant="ghost"
                             size="sm"
                             onClick={() => setShowEmojis(!showEmojis)}
-                            className="h-8 w-8 p-0"
+                            className="h-8 w-8 p-0 text-gray-400 hover:text-white"
                         >
                             <FaceSmileIcon className="h-4 w-4" />
                         </Button>
@@ -538,31 +295,39 @@ const GameChat: React.FC<GameChatProps> = ({ className = '' }) => {
                         <Input
                             ref={inputRef}
                             type="text"
-                            placeholder="Type a message... (use /help for commands)"
+                            placeholder="Введите сообщение... (используйте /help для команд)"
                             value={chatInput}
                             onChange={handleInputChange}
-                            className="flex-1"
+                            className="flex-1 bg-gray-700 border-gray-600 text-white placeholder-gray-400 focus:border-blue-500 focus:ring-blue-500"
                             autoComplete="off"
+                            disabled={!isConnected}
                         />
 
                         <Button
                             type="submit"
-                            disabled={!chatInput.trim()}
+                            disabled={!chatInput.trim() || !isConnected}
                             size="sm"
-                            variant="default"
+                            className="bg-blue-600 hover:bg-blue-700 text-white"
                         >
                             <PaperAirplaneIcon className="h-4 w-4" />
                         </Button>
                     </form>
 
                     {/* Input hints */}
-                    <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                    <div className="text-xs text-gray-500 mt-1">
                         {chatInput.startsWith('/') ? (
-                            <span>💡 Command mode - type /help for available commands</span>
+                            <span>💡 Режим команды - введите /help для доступных команд</span>
                         ) : (
-                            <span>💬 Press Enter to send • Use /roll for dice • Use /ooc for out of character</span>
+                            <span>💬 Enter для отправки • /roll для костей • /ooc для OOC</span>
                         )}
                     </div>
+
+                    {/* Connection status */}
+                    {!isConnected && (
+                        <div className="mt-2 text-xs text-red-400 text-center">
+                            ⚠️ Не подключен к игре
+                        </div>
+                    )}
                 </div>
             </CardContent>
         </Card>
