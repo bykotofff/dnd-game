@@ -21,15 +21,17 @@ import GameChat from '@/components/game/GameChat';
 import ScenePanel from '@/components/game/ScenePanel';
 import PlayersPanel from '@/components/game/PlayersPanel';
 import InitiativeTracker from '@/components/game/InitiativeTracker';
-import { useGameStore, useGameConnection, useGameActions } from '@/store/gameStore';
+import { useGameStore } from '@/store/gameStore';
 import { useAuth } from '@/store/authStore';
+import { gameService } from '@/services/gameService';
 
 const GamePage: React.FC = () => {
-    const { id: gameId } = useParams<{ id: string }>();
+    const { gameId } = useParams<{ gameId: string }>();
     const navigate = useNavigate();
     const { user } = useAuth();
 
-    // Состояние игры
+    // Получаем состояние и действия из store
+    const store = useGameStore();
     const {
         currentGame,
         isConnected,
@@ -37,27 +39,68 @@ const GamePage: React.FC = () => {
         connectionError,
         messages,
         currentScene,
-        players
-    } = useGameConnection();
+        players,
+        playersOnline,
+        connectToGame,
+        disconnectFromGame,
+        sendAction,
+        sendMessage,
+        setCurrentGame
+    } = store;
 
-    const { connectToGame, disconnectFromGame, sendAction } = useGameActions();
+    // Локальное состояние для загрузки
+    const [isLoadingGame, setIsLoadingGame] = useState(false);
+    const [loadError, setLoadError] = useState<string | null>(null);
 
-    // Локальное состояние
+    // Локальное состояние интерфейса
     const [actionInput, setActionInput] = useState('');
     const [showHelperButtons, setShowHelperButtons] = useState(true);
 
-    // Подключение к игре при загрузке
+    // Загрузка игры напрямую через gameService
     useEffect(() => {
-        if (gameId && user && !isConnected && !isConnecting) {
-            connectToGame(gameId);
-        }
+        const loadGameData = async () => {
+            if (!gameId || !user) return;
 
+            setIsLoadingGame(true);
+            setLoadError(null);
+
+            try {
+                console.log('Loading game data:', gameId);
+                const gameData = await gameService.getGame(gameId);
+                console.log('Game data loaded:', gameData);
+
+                // Устанавливаем игру в store
+                setCurrentGame(gameData);
+                setIsLoadingGame(false);
+
+            } catch (error: any) {
+                console.error('Failed to load game:', error);
+                setLoadError(error.message || 'Не удалось загрузить игру');
+                setIsLoadingGame(false);
+            }
+        };
+
+        loadGameData();
+    }, [gameId, user, setCurrentGame]);
+
+    // Автоматическое подключение к WebSocket после загрузки игры
+    useEffect(() => {
+        if (currentGame && gameId && !isConnected && !isConnecting && !loadError) {
+            console.log('Connecting to game WebSocket:', gameId);
+            connectToGame(gameId).catch((error) => {
+                console.error('Failed to connect to game:', error);
+            });
+        }
+    }, [currentGame, gameId, isConnected, isConnecting, connectToGame, loadError]);
+
+    // Очистка при размонтировании
+    useEffect(() => {
         return () => {
             if (isConnected) {
                 disconnectFromGame();
             }
         };
-    }, [gameId, user, isConnected, isConnecting, connectToGame, disconnectFromGame]);
+    }, [isConnected, disconnectFromGame]);
 
     // Обработка отправки действия
     const handleActionSubmit = (e: React.FormEvent) => {
@@ -101,11 +144,12 @@ const GamePage: React.FC = () => {
         color: 'text-red-400'
     };
 
+    // Проверка ID игры
     if (!gameId) {
         return (
             <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center">
                 <div className="text-center">
-                    <h2 className="text-2xl font-bold text-white mb-4">Игра не найдена</h2>
+                    <h2 className="text-2xl font-bold text-white mb-4">Некорректный ID игры</h2>
                     <Button onClick={() => navigate('/campaigns')} variant="outline">
                         Вернуться к кампаниям
                     </Button>
@@ -114,6 +158,43 @@ const GamePage: React.FC = () => {
         );
     }
 
+    // Показываем ошибку если игра не найдена
+    if (loadError && !isLoadingGame) {
+        return (
+            <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center">
+                <div className="text-center">
+                    <h2 className="text-2xl font-bold text-white mb-4">Игра не найдена</h2>
+                    <p className="text-gray-400 mb-4">{loadError}</p>
+                    <div className="space-x-2">
+                        <Button
+                            onClick={() => window.location.reload()}
+                            variant="primary"
+                        >
+                            Попробовать еще раз
+                        </Button>
+                        <Button onClick={() => navigate('/campaigns')} variant="outline">
+                            Вернуться к кампаниям
+                        </Button>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
+    // Показываем загрузку
+    if (isLoadingGame || (!currentGame && !loadError)) {
+        return (
+            <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center">
+                <div className="text-center">
+                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-400 mx-auto mb-4"></div>
+                    <h2 className="text-xl font-semibold text-white mb-2">Загрузка игры...</h2>
+                    <p className="text-gray-400">Получаем данные об игре</p>
+                </div>
+            </div>
+        );
+    }
+
+    // Основной интерфейс игры
     return (
         <div className="min-h-screen bg-gray-900 text-white flex">
             {/* Main game area */}
@@ -133,7 +214,7 @@ const GamePage: React.FC = () => {
                                 {currentGame?.name || 'Игровая сессия'}
                             </h1>
                             <p className="text-sm text-gray-400">
-                                D&D 5e • {players.length} игроков онлайн
+                                D&D 5e • {(players || playersOnline || []).length} игроков онлайн
                             </p>
                         </div>
                     </div>
@@ -176,7 +257,7 @@ const GamePage: React.FC = () => {
                             />
                         </div>
 
-                        {/* Player Actions Input - ИСПРАВЛЕНИЕ #1 */}
+                        {/* Player Actions Input */}
                         <div className="bg-gray-800 border-t border-gray-700 p-4">
                             <Card className="bg-gray-700 border-gray-600">
                                 <CardHeader className="pb-3">
@@ -205,7 +286,7 @@ const GamePage: React.FC = () => {
                                         </Button>
                                     </form>
 
-                                    {/* Helper action buttons - ИСПРАВЛЕНИЕ #2 */}
+                                    {/* Helper action buttons */}
                                     {showHelperButtons && (
                                         <div className="space-y-2">
                                             <div className="flex items-center justify-between">
@@ -265,7 +346,7 @@ const GamePage: React.FC = () => {
                             <InitiativeTracker />
                         </div>
 
-                        {/* Chat - ИСПРАВЛЕНИЕ #3 */}
+                        {/* Chat */}
                         <div className="flex-1 flex flex-col min-h-0">
                             <GameChat
                                 gameId={gameId}

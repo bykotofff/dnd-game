@@ -13,7 +13,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
-import { useGameChat, useGameConnection } from '@/store/gameStore';
+import { useGameStore } from '@/store/gameStore';
 import type { GameMessage } from '@/types';
 
 interface GameChatProps {
@@ -22,16 +22,15 @@ interface GameChatProps {
 }
 
 const GameChat: React.FC<GameChatProps> = ({ gameId, className = '' }) => {
+    // Получаем состояние из store
     const {
         messages,
         chatInput,
-        isTyping,
+        isConnected,
         sendMessage,
         setChatInput,
         setTyping
-    } = useGameChat();
-
-    const { isConnected } = useGameConnection();
+    } = useGameStore();
 
     const [showEmojis, setShowEmojis] = useState(false);
     const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -128,8 +127,8 @@ const GameChat: React.FC<GameChatProps> = ({ gameId, className = '' }) => {
     const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         setChatInput(e.target.value);
 
-        // Индикатор печати
-        if (!isTyping && e.target.value.length > 0) {
+        // Индикатор печати (если нужно)
+        if (setTyping && e.target.value.length > 0) {
             setTyping(true);
             setTimeout(() => setTyping(false), 3000);
         }
