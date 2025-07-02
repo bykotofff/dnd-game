@@ -26,7 +26,7 @@ import { useAuth } from '@/store/authStore';
 import { gameService } from '@/services/gameService';
 
 const GamePage: React.FC = () => {
-    const { gameId } = useParams<{ gameId: string }>();
+    const { gameId } = useParams<{ gameId: string }>(); // ИСПРАВЛЕНИЕ: изменили id на gameId
     const navigate = useNavigate();
     const { user } = useAuth();
 
@@ -196,60 +196,79 @@ const GamePage: React.FC = () => {
 
     // Основной интерфейс игры
     return (
-        <div className="min-h-screen bg-gray-900 text-white flex">
+        <div className="min-h-screen bg-gray-900 text-white">
             {/* Main game area */}
-            <div className="flex-1 flex flex-col">
+            <div className="flex flex-col h-screen">
                 {/* Header */}
-                <header className="bg-gray-800 border-b border-gray-700 px-4 py-3 flex items-center justify-between">
-                    <div className="flex items-center space-x-4">
-                        <Button
-                            onClick={() => navigate('/campaigns')}
-                            variant="ghost"
-                            className="text-gray-400 hover:text-white"
-                        >
-                            <ArrowLeftIcon className="w-5 h-5" />
-                        </Button>
-                        <div>
-                            <h1 className="text-lg font-semibold text-white">
-                                {currentGame?.name || 'Игровая сессия'}
-                            </h1>
-                            <p className="text-sm text-gray-400">
-                                D&D 5e • {(players || playersOnline || []).length} игроков онлайн
-                            </p>
-                        </div>
-                    </div>
-
-                    <div className="flex items-center space-x-3">
-                        {/* Connection status */}
-                        <div className="flex items-center space-x-2">
-                            <connectionStatus.icon className={`w-4 h-4 ${connectionStatus.color}`} />
-                            <span className={`text-sm ${connectionStatus.color}`}>
-                                {connectionStatus.text}
-                            </span>
+                <header className="bg-gray-800 border-b border-gray-700 px-3 sm:px-4 py-3 flex-shrink-0">
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-center space-x-2 sm:space-x-4 min-w-0 flex-1">
+                            <Button
+                                onClick={() => navigate('/campaigns')}
+                                variant="ghost"
+                                size="sm"
+                                className="text-gray-400 hover:text-white flex-shrink-0"
+                            >
+                                <ArrowLeftIcon className="w-4 h-4 sm:w-5 sm:h-5" />
+                            </Button>
+                            <div className="min-w-0 flex-1">
+                                <h1 className="text-sm sm:text-lg font-semibold text-white truncate">
+                                    {currentGame?.name || 'Игровая сессия'}
+                                </h1>
+                                <p className="text-xs sm:text-sm text-gray-400 truncate">
+                                    D&D 5e • {(players || playersOnline || []).length} игроков онлайн
+                                </p>
+                            </div>
                         </div>
 
-                        {/* Settings */}
-                        <Button variant="ghost" className="text-gray-400 hover:text-white">
-                            <Cog6ToothIcon className="w-5 h-5" />
-                        </Button>
+                        <div className="flex items-center space-x-2 sm:space-x-3 flex-shrink-0">
+                            {/* Connection status */}
+                            <div className="hidden sm:flex items-center space-x-2">
+                                <connectionStatus.icon className={`w-4 h-4 ${connectionStatus.color}`} />
+                                <span className={`text-sm ${connectionStatus.color}`}>
+                                    {connectionStatus.text}
+                                </span>
+                            </div>
 
-                        {/* Leave game */}
-                        <Button
-                            onClick={handleLeaveGame}
-                            variant="outline"
-                            className="text-red-400 border-red-400 hover:bg-red-400 hover:text-white"
-                        >
-                            Покинуть игру
-                        </Button>
+                            {/* Mobile connection indicator */}
+                            <div className="sm:hidden">
+                                <connectionStatus.icon className={`w-5 h-5 ${connectionStatus.color}`} />
+                            </div>
+
+                            {/* Settings */}
+                            <Button variant="ghost" size="sm" className="text-gray-400 hover:text-white">
+                                <Cog6ToothIcon className="w-4 h-4 sm:w-5 sm:h-5" />
+                            </Button>
+
+                            {/* Leave game */}
+                            <Button
+                                onClick={handleLeaveGame}
+                                variant="outline"
+                                size="sm"
+                                className="text-red-400 border-red-400 hover:bg-red-400 hover:text-white hidden sm:flex"
+                            >
+                                Покинуть игру
+                            </Button>
+
+                            {/* Mobile leave button */}
+                            <Button
+                                onClick={handleLeaveGame}
+                                variant="ghost"
+                                size="sm"
+                                className="text-red-400 hover:text-red-300 sm:hidden"
+                            >
+                                <ArrowLeftIcon className="w-4 h-4" />
+                            </Button>
+                        </div>
                     </div>
                 </header>
 
                 {/* Game content */}
-                <div className="flex-1 flex">
+                <div className="flex-1 flex flex-col lg:flex-row min-h-0">
                     {/* Main content area */}
-                    <div className="flex-1 flex flex-col">
+                    <div className="flex-1 flex flex-col min-h-0">
                         {/* Scene panel */}
-                        <div className="flex-1 p-4">
+                        <div className="flex-1 p-2 sm:p-4 min-h-0">
                             <ScenePanel
                                 scene={currentScene}
                                 gameId={gameId}
@@ -258,15 +277,16 @@ const GamePage: React.FC = () => {
                         </div>
 
                         {/* Player Actions Input */}
-                        <div className="bg-gray-800 border-t border-gray-700 p-4">
+                        <div className="bg-gray-800 border-t border-gray-700 p-2 sm:p-4 flex-shrink-0">
                             <Card className="bg-gray-700 border-gray-600">
-                                <CardHeader className="pb-3">
-                                    <CardTitle className="text-lg font-medium text-white flex items-center">
-                                        <MicrophoneIcon className="w-5 h-5 mr-2" />
-                                        Действия персонажа
+                                <CardHeader className="pb-2 sm:pb-3">
+                                    <CardTitle className="text-base sm:text-lg font-medium text-white flex items-center">
+                                        <MicrophoneIcon className="w-4 h-4 sm:w-5 sm:h-5 mr-2" />
+                                        <span className="hidden sm:inline">Действия персонажа</span>
+                                        <span className="sm:hidden">Действия</span>
                                     </CardTitle>
                                 </CardHeader>
-                                <CardContent className="space-y-4">
+                                <CardContent className="space-y-3 sm:space-y-4">
                                     {/* Input form */}
                                     <form onSubmit={handleActionSubmit} className="flex space-x-2">
                                         <Input
@@ -274,13 +294,14 @@ const GamePage: React.FC = () => {
                                             placeholder="Опишите действие вашего персонажа..."
                                             value={actionInput}
                                             onChange={(e) => setActionInput(e.target.value)}
-                                            className="flex-1 bg-gray-600 border-gray-500 text-white placeholder-gray-400 focus:border-blue-500 focus:ring-blue-500"
+                                            className="flex-1 bg-gray-600 border-gray-500 text-white placeholder-gray-400 focus:border-blue-500 focus:ring-blue-500 text-sm sm:text-base"
                                             disabled={!isConnected}
                                         />
                                         <Button
                                             type="submit"
                                             disabled={!actionInput.trim() || !isConnected}
                                             variant="primary"
+                                            size="sm"
                                         >
                                             <PaperAirplaneIcon className="w-4 h-4" />
                                         </Button>
@@ -290,16 +311,17 @@ const GamePage: React.FC = () => {
                                     {showHelperButtons && (
                                         <div className="space-y-2">
                                             <div className="flex items-center justify-between">
-                                                <span className="text-sm text-gray-300">Быстрые действия:</span>
+                                                <span className="text-xs sm:text-sm text-gray-300">Быстрые действия:</span>
                                                 <Button
                                                     variant="darkGhost"
                                                     size="sm"
                                                     onClick={() => setShowHelperButtons(!showHelperButtons)}
+                                                    className="text-xs"
                                                 >
                                                     Скрыть
                                                 </Button>
                                             </div>
-                                            <div className="grid grid-cols-2 lg:grid-cols-3 gap-2">
+                                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-1 sm:gap-2">
                                                 {helperActions.map((action, index) => (
                                                     <Button
                                                         key={index}
@@ -307,6 +329,7 @@ const GamePage: React.FC = () => {
                                                         size="sm"
                                                         onClick={() => setActionInput(action.action)}
                                                         disabled={!isConnected}
+                                                        className="text-xs sm:text-sm py-1 sm:py-2"
                                                     >
                                                         {action.text}
                                                     </Button>
@@ -320,6 +343,7 @@ const GamePage: React.FC = () => {
                                             variant="darkGhost"
                                             size="sm"
                                             onClick={() => setShowHelperButtons(true)}
+                                            className="text-xs sm:text-sm"
                                         >
                                             Показать быстрые действия
                                         </Button>
@@ -334,41 +358,70 @@ const GamePage: React.FC = () => {
                         </div>
                     </div>
 
-                    {/* Right sidebar */}
-                    <div className="w-96 bg-gray-800 border-l border-gray-700 flex flex-col">
-                        {/* Players panel */}
-                        <div className="p-4 border-b border-gray-700">
-                            <PlayersPanel />
+                    {/* Right sidebar - адаптивная */}
+                    <div className="w-full lg:w-96 bg-gray-800 border-t lg:border-t-0 lg:border-l border-gray-700 flex flex-col max-h-96 lg:max-h-none">
+                        {/* На мобильных - горизонтальные вкладки, на десктопе - вертикальные панели */}
+                        <div className="lg:hidden">
+                            {/* Mobile tabs */}
+                            <div className="flex border-b border-gray-700">
+                                <button className="flex-1 px-3 py-2 text-sm font-medium text-gray-300 border-b-2 border-blue-500">
+                                    Чат
+                                </button>
+                                <button className="flex-1 px-3 py-2 text-sm font-medium text-gray-500">
+                                    Игроки
+                                </button>
+                                <button className="flex-1 px-3 py-2 text-sm font-medium text-gray-500">
+                                    Инициатива
+                                </button>
+                            </div>
+
+                            {/* Mobile content */}
+                            <div className="flex-1 min-h-0">
+                                <GameChat
+                                    gameId={gameId}
+                                    className="h-full"
+                                />
+                            </div>
                         </div>
 
-                        {/* Initiative tracker */}
-                        <div className="p-4 border-b border-gray-700">
-                            <InitiativeTracker />
-                        </div>
+                        {/* Desktop layout */}
+                        <div className="hidden lg:flex lg:flex-col lg:h-full">
+                            {/* Players panel */}
+                            <div className="p-3 border-b border-gray-700 flex-shrink-0">
+                                <PlayersPanel />
+                            </div>
 
-                        {/* Chat */}
-                        <div className="flex-1 flex flex-col min-h-0">
-                            <GameChat
-                                gameId={gameId}
-                                className="flex-1"
-                            />
+                            {/* Initiative tracker */}
+                            <div className="p-3 border-b border-gray-700 flex-shrink-0">
+                                <InitiativeTracker />
+                            </div>
+
+                            {/* Chat */}
+                            <div className="flex-1 min-h-0">
+                                <GameChat
+                                    gameId={gameId}
+                                    className="h-full"
+                                />
+                            </div>
                         </div>
                     </div>
                 </div>
 
                 {/* Connection error display */}
                 {connectionError && (
-                    <div className="bg-red-900/50 border-t border-red-700 p-4">
-                        <div className="flex items-center space-x-2">
-                            <ExclamationTriangleIcon className="w-5 h-5 text-red-400" />
-                            <span className="text-red-300">
-                                Ошибка подключения: {connectionError}
-                            </span>
+                    <div className="bg-red-900/50 border-t border-red-700 p-3 sm:p-4 flex-shrink-0">
+                        <div className="flex flex-col sm:flex-row sm:items-center space-y-2 sm:space-y-0 sm:space-x-2">
+                            <div className="flex items-center space-x-2">
+                                <ExclamationTriangleIcon className="w-5 h-5 text-red-400 flex-shrink-0" />
+                                <span className="text-red-300 text-sm">
+                                    Ошибка подключения: {connectionError}
+                                </span>
+                            </div>
                             <Button
                                 variant="outline"
                                 size="sm"
                                 onClick={() => connectToGame(gameId)}
-                                className="ml-auto text-red-400 border-red-400 hover:bg-red-400 hover:text-white"
+                                className="text-red-400 border-red-400 hover:bg-red-400 hover:text-white sm:ml-auto"
                             >
                                 Переподключиться
                             </Button>
