@@ -771,9 +771,12 @@ async def get_ai_response(
             })
 
             # Отправляем запрос к ИИ сервису
-            ai_response = await ai_service.get_dm_response(
-                player_message=request_data.message,
-                context=context
+            ai_response = await ai_service.generate_dm_response(
+                game_id=game_id,
+                player_action=request_data.message,
+                game_context=context,
+                character_sheets=[],
+                recent_messages=[]
             )
 
             # Отправляем ответ ИИ через WebSocket всем игрокам в игре

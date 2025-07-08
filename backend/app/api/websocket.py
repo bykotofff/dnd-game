@@ -392,11 +392,18 @@ async def handle_player_action(websocket: WebSocket, game_id: str, user_id: str,
 async def handle_ai_response(game_id: str, player_action: str, context: dict, player_name: str):
     """Асинхронная обработка ответа ИИ"""
     try:
-        # Получаем ответ от ИИ
-        ai_response = await ai_service.get_dm_response(
-            player_message=player_action,
-            context=context
+        # ✅ ИСПРАВЛЕНО: Используем правильный метод generate_dm_response
+        ai_response = await ai_service.generate_dm_response(
+            game_id=game_id,
+            player_action=player_action,
+            game_context=context,
+            character_sheets=[],  # Пока пустой список, можно добавить персонажей
+            recent_messages=[]    # Пока пустой список, можно добавить историю
         )
+
+        if not ai_response:
+            # Если ИИ не ответил, отправляем дефолтный ответ
+            ai_response = f"*ИИ Мастер обдумывает ответ на действие {player_name}. Попробуйте описать свое действие более подробно.*"
 
         # Отправляем ответ ИИ всем игрокам через WebSocket
         ai_msg = WebSocketMessage("ai_response", {
@@ -415,11 +422,11 @@ async def handle_ai_response(game_id: str, player_action: str, context: dict, pl
         logger.error(f"Error generating AI response: {e}")
 
         # Отправляем дефолтный ответ если ИИ недоступен
-        fallback_response = f"*ИИ Мастер обдумывает ответ на действие {player_name}...*"
+        fallback_response = f"*ИИ Мастер временно недоступен. {player_name}, продолжайте игру! Что вы делаете дальше?*"
 
         fallback_msg = WebSocketMessage("ai_response", {
             "message": fallback_response,
-            "sender_name": "ИИ Мастер",
+            "sender_name": "ИИ Мастер (оффлайн)",
             "timestamp": datetime.utcnow().isoformat(),
             "in_response_to": player_action,
             "is_fallback": True
