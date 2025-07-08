@@ -249,6 +249,52 @@ const GamePage = () => {
                 setLocalMessages(prev => [...prev, newMessage]);
             });
 
+            // ✅ НОВЫЙ: Обработчик запроса броска от ИИ
+            websocketService.on('roll_request', (data) => {
+                console.log('Received roll request:', data);
+                const newMessage = {
+                    id: Date.now().toString(),
+                    type: 'roll_request',
+                    content: data.message,
+                    sender: 'ИИ Мастер',
+                    timestamp: data.timestamp,
+                    roll_data: {
+                        roll_type: data.roll_type,
+                        ability_or_skill: data.ability_or_skill,
+                        dc: data.dc,
+                        advantage: data.advantage,
+                        disadvantage: data.disadvantage,
+                        original_action: data.original_action
+                    }
+                };
+                setLocalMessages(prev => [...prev, newMessage]);
+
+                // Автоматически устанавливаем нужный тип кубика и показываем панель костей
+                if (data.roll_type === 'skill_check' || data.roll_type === 'ability_check') {
+                    setSelectedDice('d20');
+                }
+            });
+
+            // ✅ НОВЫЙ: Обработчик результата проверки
+            websocketService.on('dice_check_result', (data) => {
+                console.log('Received dice check result:', data);
+                const newMessage = {
+                    id: Date.now().toString(),
+                    type: 'dice_check_result',
+                    content: data.message,
+                    sender: 'ИИ Мастер',
+                    timestamp: data.timestamp,
+                    check_data: {
+                        roll_result: data.roll_result,
+                        dc: data.dc,
+                        success: data.success,
+                        original_action: data.original_action,
+                        player_name: data.player_name
+                    }
+                };
+                setLocalMessages(prev => [...prev, newMessage]);
+            });
+
             websocketService.on('ai_response', (data) => {
                 console.log('Received AI response:', data);
                 const newMessage = {
@@ -346,14 +392,86 @@ const GamePage = () => {
         if (!gameId) return;
 
         try {
-            const notation = selectedDice + (diceModifier !== 0 ? (diceModifier > 0 ? '+' + diceModifier : diceModifier) : '');
-            const success = websocketService.sendDiceRoll(notation, 'manual_roll');
-            if (!success) {
-                await gameService.rollDice(gameId, notation, 'manual_roll');
+            // Формируем полную нотацию с модификаторами
+            let notation = selectedDice;
+            if (diceModifier !== 0) {
+                notation += diceModifier > 0 ? `+${diceModifier}` : `${diceModifier}`;
             }
+
+            // Определяем цель броска
+            const purpose = `Бросок ${notation}`;
+
+            // Отправляем бросок через WebSocket
+            const success = websocketService.sendDiceRoll(notation, purpose);
+            if (!success) {
+                // Fallback to API if WebSocket fails
+                await gameService.rollDice(gameId, notation, purpose);
+            }
+
+            // Сбрасываем модификатор после броска
+            setDiceModifier(0);
+
         } catch (error) {
             console.error('Failed to roll dice:', error);
+            setLoadError('Не удалось выполнить бросок костей: ' + error.message);
         }
+    };
+
+// ✅ НОВАЯ ФУНКЦИЯ: Быстрый бросок d20 с модификатором
+    const handleQuickD20Roll = (modifier = 0, purpose = 'Проверка d20') => {
+        try {
+            const notation = modifier !== 0 ? `1d20${modifier > 0 ? '+' : ''}${modifier}` : '1d20';
+            const success = websocketService.sendDiceRoll(notation, purpose);
+            if (!success) {
+                console.error('WebSocket не подключен для быстрого броска');
+            }
+        } catch (error) {
+            console.error('Failed to perform quick roll:', error);
+        }
+    };
+
+// ✅ НОВАЯ ФУНКЦИЯ: Автоматический бросок проверки
+    const handleCheckRoll = (rollData) => {
+        try {
+            let notation = '1d20';
+
+            // Добавляем базовый модификатор (можно расширить для персонажей)
+            const baseModifier = getAbilityModifier(rollData.ability_or_skill);
+            if (baseModifier !== 0) {
+                notation += baseModifier > 0 ? `+${baseModifier}` : `${baseModifier}`;
+            }
+
+            const purpose = `Проверка ${rollData.ability_or_skill} (DC ${rollData.dc})`;
+
+            const success = websocketService.sendDiceRoll(notation, purpose);
+            if (!success) {
+                console.error('WebSocket не подключен для проверки');
+            }
+        } catch (error) {
+            console.error('Failed to perform check roll:', error);
+        }
+    };
+
+// ✅ ВСПОМОГАТЕЛЬНАЯ ФУНКЦИЯ: Получить модификатор характеристики
+    const getAbilityModifier = (ability) => {
+        // Пока используем базовые модификаторы, позже можно получать из профиля персонажа
+        const defaultModifiers = {
+            'strength': 1,
+            'dexterity': 2,
+            'constitution': 1,
+            'intelligence': 0,
+            'wisdom': 1,
+            'charisma': 0,
+            'athletics': 3,      // Сила + профiciency
+            'perception': 3,     // Мудрость + профiciency
+            'investigation': 2,  // Интеллект + профiciency
+            'stealth': 4,        // Ловкость + proficiency
+            'persuasion': 2,     // Харизма + proficiency
+            'deception': 0,      // Харизма
+            'insight': 1,        // Мудрость
+        };
+
+        return defaultModifiers[ability?.toLowerCase()] || 0;
     };
 
     const handleLeaveGame = () => {
@@ -390,6 +508,10 @@ const GamePage = () => {
                 return 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-700 text-green-900 dark:text-green-100';
             case 'dice_roll':
                 return 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-700 text-red-900 dark:text-red-100';
+            case 'roll_request':
+                return 'bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 dark:border-yellow-700 text-yellow-900 dark:text-yellow-100';
+            case 'dice_check_result':
+                return 'bg-indigo-50 dark:bg-indigo-900/20 border-indigo-200 dark:border-indigo-700 text-indigo-900 dark:text-indigo-100';
             case 'chat':
                 return 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-700 text-blue-900 dark:text-blue-100';
             default:
@@ -529,7 +651,7 @@ const GamePage = () => {
                                 const gameMessages = actualMessages?.filter(msg =>
                                     msg.type !== 'chat' &&
                                     msg.message_type !== 'chat' &&
-                                    ['action', 'dice_roll', 'ai_dm', 'system'].includes(msg.type || msg.message_type)
+                                    ['action', 'dice_roll', 'ai_dm', 'system', 'roll_request', 'dice_check_result'].includes(msg.type || msg.message_type)
                                 ) || [];
 
                                 if (gameMessages.length === 0) {
@@ -550,25 +672,77 @@ const GamePage = () => {
                                         className={`p-3 rounded-lg border ${getMessageStyle(message.type)} shadow-sm`}
                                     >
                                         <div className="flex items-center justify-between mb-1">
-                                            <span className="font-semibold text-sm flex items-center">
-                                                {message.type === 'action' && <span className="mr-2">⚔️</span>}
-                                                {message.type === 'dice_roll' && <span className="mr-2">🎲</span>}
-                                                {message.type === 'ai_dm' && <span className="mr-2">🤖</span>}
-                                                {message.type === 'system' && <span className="mr-2">⚡</span>}
-                                                {message.sender || message.sender_name || 'Неизвестный'}
-                                            </span>
+            <span className="font-semibold text-sm flex items-center">
+                {message.type === 'action' && <span className="mr-2">⚔️</span>}
+                {message.type === 'dice_roll' && <span className="mr-2">🎲</span>}
+                {message.type === 'ai_dm' && <span className="mr-2">🤖</span>}
+                {message.type === 'system' && <span className="mr-2">⚡</span>}
+                {message.type === 'roll_request' && <span className="mr-2">🎯</span>}
+                {message.type === 'dice_check_result' && (
+                    <span className="mr-2">
+                        {message.check_data?.success ? '✅' : '❌'}
+                    </span>
+                )}
+                {message.sender || message.sender_name || 'Неизвестный'}
+            </span>
                                             <span className="text-xs opacity-60">
-                                                {new Date(message.timestamp).toLocaleTimeString()}
-                                            </span>
+                {new Date(message.timestamp).toLocaleTimeString()}
+            </span>
                                         </div>
-                                        <p className="text-sm leading-relaxed">{message.content}</p>
+
+                                        {/* Основной контент сообщения */}
+                                        <div className="text-sm leading-relaxed mb-2">
+                                            {message.content}
+                                        </div>
+
+                                        {/* Дополнительная информация для разных типов сообщений */}
+                                        {message.type === 'roll_request' && message.roll_data && (
+                                            <div className="mt-2 p-2 bg-yellow-100 dark:bg-yellow-900/30 rounded border">
+                                                <div className="text-xs space-y-1">
+                                                    <div><strong>Тип:</strong> {message.roll_data.roll_type}</div>
+                                                    <div><strong>Навык:</strong> {message.roll_data.ability_or_skill}</div>
+                                                    <div><strong>Сложность:</strong> {message.roll_data.dc}</div>
+                                                    {message.roll_data.advantage && <div className="text-green-600">✅ Преимущество</div>}
+                                                    {message.roll_data.disadvantage && <div className="text-red-600">⚠️ Помеха</div>}
+                                                </div>
+                                                <button
+                                                    onClick={() => {
+                                                        setSelectedDice('d20');
+                                                        // Можно добавить автоматический бросок если нужно
+                                                    }}
+                                                    className="mt-2 px-3 py-1 bg-yellow-500 text-white rounded text-xs hover:bg-yellow-600 transition-colors"
+                                                >
+                                                    🎲 Бросить d20
+                                                </button>
+                                            </div>
+                                        )}
+
+                                        {message.type === 'dice_check_result' && message.check_data && (
+                                            <div className={`mt-2 p-2 rounded border ${
+                                                message.check_data.success
+                                                    ? 'bg-green-100 dark:bg-green-900/30 border-green-200 dark:border-green-700'
+                                                    : 'bg-red-100 dark:bg-red-900/30 border-red-200 dark:border-red-700'
+                                            }`}>
+                                                <div className="text-xs space-y-1">
+                                                    <div><strong>Результат броска:</strong> {message.check_data.roll_result}</div>
+                                                    <div><strong>Нужно было:</strong> {message.check_data.dc}</div>
+                                                    <div className={`font-bold ${message.check_data.success ? 'text-green-600' : 'text-red-600'}`}>
+                                                        {message.check_data.success ? '✅ УСПЕХ' : '❌ НЕУДАЧА'}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {/* Метка типа сообщения */}
                                         <div className="mt-2 flex items-center justify-between">
-                                            <span className="text-xs opacity-50 capitalize">
-                                                {message.type === 'action' && 'Действие игрока'}
-                                                {message.type === 'dice_roll' && 'Бросок костей'}
-                                                {message.type === 'ai_dm' && 'Ответ мастера'}
-                                                {message.type === 'system' && 'Системное сообщение'}
-                                            </span>
+            <span className="text-xs opacity-50 capitalize">
+                {message.type === 'action' && 'Действие игрока'}
+                {message.type === 'dice_roll' && 'Бросок костей'}
+                {message.type === 'ai_dm' && 'Ответ мастера'}
+                {message.type === 'system' && 'Системное сообщение'}
+                {message.type === 'roll_request' && 'Запрос проверки'}
+                {message.type === 'dice_check_result' && 'Результат проверки'}
+            </span>
                                         </div>
                                     </div>
                                 ));
@@ -656,54 +830,186 @@ const GamePage = () => {
                         </div>
 
                         {/* Dice Panel */}
+                        {/* Dice Panel - ✅ УЛУЧШЕНО с быстрыми проверками */}
                         <div className="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 p-4">
                             <h4 className="font-semibold mb-3 flex items-center text-gray-900 dark:text-white">
                                 <CubeIcon className="w-5 h-5 mr-2" />
                                 Броски кубиков
                             </h4>
-                            <div className="flex items-center justify-between">
-                                <div className="flex items-center space-x-3">
-                                    <select
-                                        value={selectedDice}
-                                        onChange={(e) => setSelectedDice(e.target.value)}
-                                        className="px-3 py-1 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                    >
-                                        {['d4', 'd6', 'd8', 'd10', 'd12', 'd20', 'd100'].map((dice) => (
-                                            <option key={dice} value={dice}>{dice}</option>
-                                        ))}
-                                    </select>
-                                    <div className="flex items-center space-x-1">
-                                        <button
-                                            onClick={() => setDiceModifier(Math.max(-10, diceModifier - 1))}
-                                            className="px-2 py-1 text-sm bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-200 rounded hover:bg-gray-300 dark:hover:bg-gray-500"
+
+                            {/* Основная панель бросков */}
+                            <div className="space-y-4">
+                                {/* Основной бросок кубиков */}
+                                <div className="flex items-center justify-between">
+                                    <div className="flex items-center space-x-3">
+                                        <select
+                                            value={selectedDice}
+                                            onChange={(e) => setSelectedDice(e.target.value)}
+                                            className="px-3 py-1 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                                         >
-                                            −
+                                            {['d4', 'd6', 'd8', 'd10', 'd12', 'd20', 'd100'].map((dice) => (
+                                                <option key={dice} value={dice}>{dice}</option>
+                                            ))}
+                                        </select>
+
+                                        <div className="flex items-center space-x-1">
+                                            <button
+                                                onClick={() => setDiceModifier(Math.max(-10, diceModifier - 1))}
+                                                className="px-2 py-1 text-sm bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-200 rounded hover:bg-gray-300 dark:hover:bg-gray-500"
+                                            >
+                                                −
+                                            </button>
+                                            <span className="text-sm min-w-[2rem] text-center font-mono">
+                        {diceModifier > 0 ? '+' : ''}{diceModifier}
+                    </span>
+                                            <button
+                                                onClick={() => setDiceModifier(Math.min(10, diceModifier + 1))}
+                                                className="px-2 py-1 text-sm bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-200 rounded hover:bg-gray-300 dark:hover:bg-gray-500"
+                                            >
+                                                +
+                                            </button>
+                                        </div>
+
+                                        <Button
+                                            onClick={handleDiceRoll}
+                                            variant="secondary"
+                                            size="sm"
+                                            disabled={!wsConnected}
+                                            className="bg-red-600 hover:bg-red-700"
+                                        >
+                                            🎲 Бросить
+                                        </Button>
+                                    </div>
+
+                                    <div className="text-sm text-gray-500 dark:text-gray-400">
+                                        {wsConnected ? 'Готов к игре' : 'Отключено от сервера'}
+                                    </div>
+                                </div>
+
+                                {/* Быстрые проверки D&D */}
+                                <div className="border-t border-gray-200 dark:border-gray-600 pt-3">
+                                    <h5 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                        ⚡ Быстрые проверки
+                                    </h5>
+
+                                    <div className="grid grid-cols-2 gap-2">
+                                        {/* Характеристики */}
+                                        <button
+                                            onClick={() => handleQuickD20Roll(getAbilityModifier('strength'), 'Проверка Силы')}
+                                            disabled={!wsConnected}
+                                            className="px-2 py-1 text-xs bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-200 border border-red-200 dark:border-red-700 rounded hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors disabled:opacity-50"
+                                        >
+                                            💪 Сила (+{getAbilityModifier('strength')})
                                         </button>
-                                        <span className="text-sm min-w-[2rem] text-center font-mono">
-                                            {diceModifier > 0 ? '+' : ''}{diceModifier}
-                                        </span>
+
                                         <button
-                                            onClick={() => setDiceModifier(Math.min(10, diceModifier + 1))}
-                                            className="px-2 py-1 text-sm bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-200 rounded hover:bg-gray-300 dark:hover:bg-gray-500"
+                                            onClick={() => handleQuickD20Roll(getAbilityModifier('dexterity'), 'Проверка Ловкости')}
+                                            disabled={!wsConnected}
+                                            className="px-2 py-1 text-xs bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-200 border border-green-200 dark:border-green-700 rounded hover:bg-green-200 dark:hover:bg-green-900/50 transition-colors disabled:opacity-50"
                                         >
-                                            +
+                                            🏃 Ловкость (+{getAbilityModifier('dexterity')})
+                                        </button>
+
+                                        <button
+                                            onClick={() => handleQuickD20Roll(getAbilityModifier('constitution'), 'Проверка Телосложения')}
+                                            disabled={!wsConnected}
+                                            className="px-2 py-1 text-xs bg-orange-100 dark:bg-orange-900/30 text-orange-800 dark:text-orange-200 border border-orange-200 dark:border-orange-700 rounded hover:bg-orange-200 dark:hover:bg-orange-900/50 transition-colors disabled:opacity-50"
+                                        >
+                                            🛡️ Телосложение (+{getAbilityModifier('constitution')})
+                                        </button>
+
+                                        <button
+                                            onClick={() => handleQuickD20Roll(getAbilityModifier('wisdom'), 'Проверка Мудрости')}
+                                            disabled={!wsConnected}
+                                            className="px-2 py-1 text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200 border border-blue-200 dark:border-blue-700 rounded hover:bg-blue-200 dark:hover:bg-blue-900/50 transition-colors disabled:opacity-50"
+                                        >
+                                            🧠 Мудрость (+{getAbilityModifier('wisdom')})
                                         </button>
                                     </div>
-                                    <Button
-                                        onClick={handleDiceRoll}
-                                        variant="secondary"
-                                        size="sm"
-                                        disabled={!wsConnected}
-                                    >
-                                        Бросить
-                                    </Button>
+
+                                    <div className="mt-2 grid grid-cols-2 gap-2">
+                                        {/* Навыки */}
+                                        <button
+                                            onClick={() => handleQuickD20Roll(getAbilityModifier('athletics'), 'Проверка Атлетики')}
+                                            disabled={!wsConnected}
+                                            className="px-2 py-1 text-xs bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-200 border border-purple-200 dark:border-purple-700 rounded hover:bg-purple-200 dark:hover:bg-purple-900/50 transition-colors disabled:opacity-50"
+                                        >
+                                            🏋️ Атлетика (+{getAbilityModifier('athletics')})
+                                        </button>
+
+                                        <button
+                                            onClick={() => handleQuickD20Roll(getAbilityModifier('perception'), 'Проверка Восприятия')}
+                                            disabled={!wsConnected}
+                                            className="px-2 py-1 text-xs bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-200 border border-yellow-200 dark:border-yellow-700 rounded hover:bg-yellow-200 dark:hover:bg-yellow-900/50 transition-colors disabled:opacity-50"
+                                        >
+                                            👁️ Восприятие (+{getAbilityModifier('perception')})
+                                        </button>
+
+                                        <button
+                                            onClick={() => handleQuickD20Roll(getAbilityModifier('stealth'), 'Проверка Скрытности')}
+                                            disabled={!wsConnected}
+                                            className="px-2 py-1 text-xs bg-gray-100 dark:bg-gray-900/30 text-gray-800 dark:text-gray-200 border border-gray-200 dark:border-gray-700 rounded hover:bg-gray-200 dark:hover:bg-gray-900/50 transition-colors disabled:opacity-50"
+                                        >
+                                            🥷 Скрытность (+{getAbilityModifier('stealth')})
+                                        </button>
+
+                                        <button
+                                            onClick={() => handleQuickD20Roll(getAbilityModifier('investigation'), 'Проверка Расследования')}
+                                            disabled={!wsConnected}
+                                            className="px-2 py-1 text-xs bg-indigo-100 dark:bg-indigo-900/30 text-indigo-800 dark:text-indigo-200 border border-indigo-200 dark:border-indigo-700 rounded hover:bg-indigo-200 dark:hover:bg-indigo-900/50 transition-colors disabled:opacity-50"
+                                        >
+                                            🔍 Расследование (+{getAbilityModifier('investigation')})
+                                        </button>
+                                    </div>
                                 </div>
-                                <div className="text-sm text-gray-500 dark:text-gray-400">
-                                    {wsConnected ? 'Готов к игре' : 'Отключено от сервера'}
+
+                                {/* Быстрые броски урона */}
+                                <div className="border-t border-gray-200 dark:border-gray-600 pt-3">
+                                    <h5 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                        ⚔️ Броски урона
+                                    </h5>
+
+                                    <div className="flex space-x-2">
+                                        <button
+                                            onClick={() => websocketService.sendDiceRoll('1d6', 'Урон коротким мечом')}
+                                            disabled={!wsConnected}
+                                            className="px-2 py-1 text-xs bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-200 border border-red-200 dark:border-red-700 rounded hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors disabled:opacity-50"
+                                        >
+                                            ⚔️ 1d6
+                                        </button>
+
+                                        <button
+                                            onClick={() => websocketService.sendDiceRoll('1d8', 'Урон длинным мечом')}
+                                            disabled={!wsConnected}
+                                            className="px-2 py-1 text-xs bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-200 border border-red-200 dark:border-red-700 rounded hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors disabled:opacity-50"
+                                        >
+                                            🗡️ 1d8
+                                        </button>
+
+                                        <button
+                                            onClick={() => websocketService.sendDiceRoll('1d10', 'Урон двуручным оружием')}
+                                            disabled={!wsConnected}
+                                            className="px-2 py-1 text-xs bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-200 border border-red-200 dark:border-red-700 rounded hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors disabled:opacity-50"
+                                        >
+                                            ⚔️ 1d10
+                                        </button>
+
+                                        <button
+                                            onClick={() => websocketService.sendDiceRoll('1d12', 'Урон тяжелым оружием')}
+                                            disabled={!wsConnected}
+                                            className="px-2 py-1 text-xs bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-200 border border-red-200 dark:border-red-700 rounded hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors disabled:opacity-50"
+                                        >
+                                            🔨 1d12
+                                        </button>
+                                    </div>
+                                </div>
+
+                                {/* Информация */}
+                                <div className="text-xs text-gray-500 dark:text-gray-400 pt-2 border-t border-gray-200 dark:border-gray-600">
+                                    💡 ИИ Мастер автоматически запрашивает нужные проверки для ваших действий
                                 </div>
                             </div>
                         </div>
-                    </div>
 
                     {/* Right sidebar - игроки и чат */}
                     <div className="w-80 border-l border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 flex flex-col">

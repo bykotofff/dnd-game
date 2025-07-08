@@ -280,6 +280,52 @@ class RedisClient:
             players.remove(player_id)
             return await self.set_active_players(game_id, players)
         return True
+    async def set_with_expiry(self, key: str, data: dict, expiry_seconds: int = 300):
+        """Сохранить данные с истечением срока действия"""
+        try:
+            await self.redis.setex(key, expiry_seconds, json.dumps(data))
+            return True
+
+        except Exception as e:
+            logger.error(f"Error setting data with expiry {key}: {e}")
+            return False
+
+    async def get_json(self, key: str) -> dict:
+        """Получить JSON данные по ключу"""
+        try:
+            data = await self.redis.get(key)
+            if data:
+                return json.loads(data.decode('utf-8'))
+            return None
+        except Exception as e:
+            logger.error(f"Error getting JSON data {key}: {e}")
+            return None
+
+    async def delete(self, key: str):
+        """Удалить ключ из Redis"""
+        try:
+            await self.redis.delete(key)
+            return True
+        except Exception as e:
+            logger.error(f"Error deleting key {key}: {e}")
+            return False
+
+    # Специальные методы для проверок кубиками
+    async def store_pending_dice_check(self, game_id: str, player_name: str, check_data: dict):
+        """Сохранить ожидающую проверку кубиками"""
+        key = f"pending_roll:{game_id}:{player_name}"
+        return await self.set_with_expiry(key, check_data, 300)  # 5 минут
+
+    async def get_pending_dice_check(self, game_id: str, player_name: str) -> dict:
+        """Получить ожидающую проверку кубиками"""
+        key = f"pending_roll:{game_id}:{player_name}"
+        return await self.get_json(key)
+
+    async def clear_pending_dice_check(self, game_id: str, player_name: str):
+        """Удалить ожидающую проверку кубиками"""
+        key = f"pending_roll:{game_id}:{player_name}"
+        return await self.delete(key)
+
 
 
 # Глобальный экземпляр Redis клиента

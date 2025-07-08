@@ -362,7 +362,7 @@ async def handle_player_action(websocket: WebSocket, game_id: str, user_id: str,
     # Рассылаем всем игрокам
     await manager.broadcast_to_game(action_msg.to_json(), game_id)
 
-    # ✅ НОВОЕ: Автоматически запрашиваем ответ от ИИ
+    # ✅ НОВОЕ: Автоматически анализируем действие и запрашиваем ответ от ИИ
     try:
         # Получаем информацию об игре для контекста
         from app.models.game import Game
@@ -382,30 +382,59 @@ async def handle_player_action(websocket: WebSocket, game_id: str, user_id: str,
                 "game_id": game_id
             }
 
-            # Отправляем запрос к ИИ асинхронно (не ждем ответа)
-            asyncio.create_task(handle_ai_response(game_id, action, context, user.username))
+            # Анализируем действие и отправляем запрос к ИИ
+            asyncio.create_task(handle_ai_response_with_dice_check(
+                game_id, action, context, user.username, user_id
+            ))
 
     except Exception as ai_error:
         logger.warning(f"Failed to trigger AI response: {ai_error}")
 
 
-async def handle_ai_response(game_id: str, player_action: str, context: dict, player_name: str):
-    """Асинхронная обработка ответа ИИ"""
+async def handle_ai_response_with_dice_check(game_id: str, player_action: str, context: dict, player_name: str, user_id: str):
+    """Улучшенная обработка ответа ИИ с проверками кубиками"""
     try:
-        # ✅ ИСПРАВЛЕНО: Используем правильный метод generate_dm_response
+        logger.info(f"Starting AI response with dice check for player {player_name}")
+
+        # Проверяем health AI сервиса
+        ai_health = await ai_service.health_check()
+        if not ai_health:
+            logger.warning("AI service is not available")
+            await send_fallback_ai_response(game_id, player_action, player_name)
+            return
+
+        # ✅ ШАГ 1: Анализируем действие игрока для определения нужных проверок
+        character_data = {
+            "name": player_name,
+            "class": "Fighter",  # Пока заглушка, позже можно получать из БД
+        }
+
+        dice_analysis = await ai_service.analyze_player_action(
+            action=player_action,
+            character_data=character_data,
+            current_situation=context.get('current_scene', 'Unknown situation')
+        )
+
+        logger.info(f"Dice analysis result: {dice_analysis}")
+
+        # ✅ ШАГ 2: Если нужна проверка, запрашиваем бросок
+        if dice_analysis.get("requires_roll", False):
+            await request_dice_roll(game_id, dice_analysis, player_name, player_action)
+            return  # Ждем результата броска, ИИ ответит после получения результата
+
+        # ✅ ШАГ 3: Если проверка не нужна, генерируем обычный ответ ИИ
         ai_response = await ai_service.generate_dm_response(
             game_id=game_id,
             player_action=player_action,
             game_context=context,
-            character_sheets=[],  # Пока пустой список, можно добавить персонажей
-            recent_messages=[]    # Пока пустой список, можно добавить историю
+            character_sheets=[character_data],
+            recent_messages=[]
         )
 
         if not ai_response:
-            # Если ИИ не ответил, отправляем дефолтный ответ
-            ai_response = f"*ИИ Мастер обдумывает ответ на действие {player_name}. Попробуйте описать свое действие более подробно.*"
+            ai_response = f"🤖 *ИИ Мастер задумался над действием {player_name}. Попробуйте описать свои намерения более подробно!*"
 
-        # Отправляем ответ ИИ всем игрокам через WebSocket
+        # Отправляем ответ ИИ
         ai_msg = WebSocketMessage("ai_response", {
             "message": ai_response,
             "sender_name": "ИИ Мастер",
@@ -415,28 +444,231 @@ async def handle_ai_response(game_id: str, player_action: str, context: dict, pl
         })
 
         await manager.broadcast_to_game(ai_msg.to_json(), game_id)
-
-        logger.info(f"AI response sent for action by {player_name} in game {game_id}")
+        logger.info(f"AI response sent for action by {player_name}")
 
     except Exception as e:
-        logger.error(f"Error generating AI response: {e}")
+        logger.error(f"Error in AI response with dice check: {e}", exc_info=True)
+        await send_fallback_ai_response(game_id, player_action, player_name)
 
-        # Отправляем дефолтный ответ если ИИ недоступен
-        fallback_response = f"*ИИ Мастер временно недоступен. {player_name}, продолжайте игру! Что вы делаете дальше?*"
 
-        fallback_msg = WebSocketMessage("ai_response", {
-            "message": fallback_response,
-            "sender_name": "ИИ Мастер (оффлайн)",
+async def request_dice_roll(game_id: str, dice_analysis: dict, player_name: str, original_action: str):
+    """Запрос броска кубиков от игрока"""
+    try:
+        roll_type = dice_analysis.get("roll_type", "skill_check")
+        ability_or_skill = dice_analysis.get("ability_or_skill", "perception")
+        dc = dice_analysis.get("dc", 15)
+        advantage = dice_analysis.get("advantage", False)
+        disadvantage = dice_analysis.get("disadvantage", False)
+
+        # Формируем сообщение с запросом броска
+        roll_request_msg = f"""🎲 **{player_name}**, для действия "{original_action}" требуется проверка!
+
+**Тип проверки:** {get_roll_type_description(roll_type)}
+**Навык/Характеристика:** {get_ability_description(ability_or_skill)}
+**Сложность (DC):** {dc}
+{f"**Преимущество:** Да ✅" if advantage else ""}
+{f"**Помеха:** Да ⚠️" if disadvantage else ""}
+
+Бросьте d20 и добавьте модификатор {ability_or_skill}!"""
+
+        # Отправляем запрос броска
+        roll_request = WebSocketMessage("roll_request", {
+            "message": roll_request_msg,
+            "sender_name": "ИИ Мастер",
             "timestamp": datetime.utcnow().isoformat(),
-            "in_response_to": player_action,
-            "is_fallback": True
+            "roll_type": roll_type,
+            "ability_or_skill": ability_or_skill,
+            "dc": dc,
+            "advantage": advantage,
+            "disadvantage": disadvantage,
+            "original_action": original_action,
+            "requesting_player": player_name
         })
 
-        try:
-            await manager.broadcast_to_game(fallback_msg.to_json(), game_id)
-        except Exception as broadcast_error:
-            logger.error(f"Failed to send fallback AI response: {broadcast_error}")
+        await manager.broadcast_to_game(roll_request.to_json(), game_id)
 
+        # Сохраняем ожидающую проверку в Redis для последующей обработки
+        await store_pending_roll_check(game_id, player_name, dice_analysis, original_action)
+
+        logger.info(f"Dice roll requested for {player_name} in game {game_id}")
+
+    except Exception as e:
+        logger.error(f"Error requesting dice roll: {e}")
+
+
+async def handle_dice_roll(websocket: WebSocket, game_id: str, user_id: str, user: User, data: Dict[str, Any], db: AsyncSession):
+    """Улучшенная обработка броска костей"""
+    notation = data.get("notation", "").strip()
+    if not notation:
+        return
+
+    try:
+        # Выполняем бросок
+        result = dice_service.roll_dice(notation)
+
+        # Создаем сообщение о броске
+        dice_msg = WebSocketMessage("dice_roll", {
+            "notation": notation,
+            "result": result,
+            "player_id": user_id,
+            "player_name": user.username,
+            "purpose": data.get("purpose", ""),
+            "timestamp": datetime.utcnow().isoformat()
+        })
+
+        # Рассылаем всем игрокам
+        await manager.broadcast_to_game(dice_msg.to_json(), game_id)
+
+        # ✅ НОВОЕ: Проверяем, есть ли ожидающая проверка для этого игрока
+        pending_check = await get_pending_roll_check(game_id, user.username)
+        if pending_check:
+            # Обрабатываем результат проверки
+            await process_dice_check_result(game_id, user.username, result, pending_check)
+            # Удаляем ожидающую проверку
+            await clear_pending_roll_check(game_id, user.username)
+
+    except Exception as e:
+        logger.error(f"Error rolling dice: {e}")
+        error_msg = WebSocketMessage("error", {"message": "Failed to roll dice"})
+        await websocket.send_text(error_msg.to_json())
+
+
+async def process_dice_check_result(game_id: str, player_name: str, roll_result: int, pending_check: dict):
+    """Обработка результата проверки кубиками"""
+    try:
+        dc = pending_check.get("dc", 15)
+        original_action = pending_check.get("original_action", "unknown action")
+        roll_type = pending_check.get("roll_type", "skill_check")
+
+        success = roll_result >= dc
+
+        # Формируем контекст для ИИ с результатом проверки
+        context = {
+            "player_name": player_name,
+            "original_action": original_action,
+            "roll_type": roll_type,
+            "roll_result": roll_result,
+            "dc": dc,
+            "success": success,
+            "margin": abs(roll_result - dc)
+        }
+
+        # Генерируем ответ ИИ на основе результата проверки
+        ai_response = await ai_service.generate_dm_response(
+            game_id=game_id,
+            player_action=f"РЕЗУЛЬТАТ ПРОВЕРКИ: {player_name} бросил {roll_result} против DC {dc} для действия '{original_action}'. {'УСПЕХ' if success else 'НЕУДАЧА'}.",
+            game_context=context,
+            character_sheets=[{"name": player_name}],
+            recent_messages=[]
+        )
+
+        if not ai_response:
+            # Генерируем базовый ответ если ИИ не ответил
+            if success:
+                ai_response = f"🎯 **{player_name}** успешно выполняет действие! (Бросок: {roll_result}, нужно было: {dc})"
+            else:
+                ai_response = f"❌ **{player_name}** терпит неудачу в попытке. (Бросок: {roll_result}, нужно было: {dc})"
+
+        # Отправляем результат проверки
+        check_result_msg = WebSocketMessage("dice_check_result", {
+            "message": ai_response,
+            "sender_name": "ИИ Мастер",
+            "timestamp": datetime.utcnow().isoformat(),
+            "roll_result": roll_result,
+            "dc": dc,
+            "success": success,
+            "original_action": original_action,
+            "player_name": player_name
+        })
+
+        await manager.broadcast_to_game(check_result_msg.to_json(), game_id)
+        logger.info(f"Dice check result processed for {player_name}: {success}")
+
+    except Exception as e:
+        logger.error(f"Error processing dice check result: {e}")
+
+
+def get_roll_type_description(roll_type: str) -> str:
+    """Получить описание типа броска"""
+    descriptions = {
+        "skill_check": "Проверка навыка",
+        "ability_check": "Проверка характеристики",
+        "attack": "Бросок атаки",
+        "saving_throw": "Спасительный бросок"
+    }
+    return descriptions.get(roll_type, "Проверка")
+
+
+def get_ability_description(ability: str) -> str:
+    """Получить описание характеристики/навыка"""
+    descriptions = {
+        "athletics": "Атлетика (Сила)",
+        "perception": "Восприятие (Мудрость)",
+        "investigation": "Расследование (Интеллект)",
+        "stealth": "Скрытность (Ловкость)",
+        "persuasion": "Убеждение (Харизма)",
+        "deception": "Обман (Харизма)",
+        "insight": "Проницательность (Мудрость)",
+        "dexterity": "Ловкость",
+        "strength": "Сила",
+        "constitution": "Телосложение",
+        "intelligence": "Интеллект",
+        "wisdom": "Мудрость",
+        "charisma": "Харизма"
+    }
+    return descriptions.get(ability.lower(), ability.title())
+
+
+# Функции для работы с Redis (хранение ожидающих проверок)
+async def store_pending_roll_check(game_id: str, player_name: str, dice_analysis: dict, original_action: str):
+    """Сохранить ожидающую проверку в Redis"""
+    try:
+        key = f"pending_roll:{game_id}:{player_name}"
+        data = {
+            **dice_analysis,
+            "original_action": original_action,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        await redis_client.set_with_expiry(key, data, 300)  # 5 минут
+    except Exception as e:
+        logger.error(f"Error storing pending roll check: {e}")
+
+
+async def get_pending_roll_check(game_id: str, player_name: str) -> dict:
+    """Получить ожидающую проверку из Redis"""
+    try:
+        key = f"pending_roll:{game_id}:{player_name}"
+        return await redis_client.get_json(key)
+    except Exception as e:
+        logger.error(f"Error getting pending roll check: {e}")
+        return None
+
+
+async def clear_pending_roll_check(game_id: str, player_name: str):
+    """Удалить ожидающую проверку из Redis"""
+    try:
+        key = f"pending_roll:{game_id}:{player_name}"
+        await redis_client.delete(key)
+    except Exception as e:
+        logger.error(f"Error clearing pending roll check: {e}")
+
+
+async def send_fallback_ai_response(game_id: str, player_action: str, player_name: str):
+    """Отправить резервный ответ ИИ"""
+    fallback_response = f"🤖 *ИИ Мастер временно недоступен. {player_name}, продолжайте игру! Что делаете дальше?*"
+
+    fallback_msg = WebSocketMessage("ai_response", {
+        "message": fallback_response,
+        "sender_name": "ИИ Мастер (оффлайн)",
+        "timestamp": datetime.utcnow().isoformat(),
+        "in_response_to": player_action,
+        "is_fallback": True
+    })
+
+    try:
+        await manager.broadcast_to_game(fallback_msg.to_json(), game_id)
+    except Exception as e:
+        logger.error(f"Failed to send fallback AI response: {e}")
 
 async def handle_dice_roll(websocket: WebSocket, game_id: str, user_id: str, user: User, data: Dict[str, Any], db: AsyncSession):
     """Обработка броска костей"""
