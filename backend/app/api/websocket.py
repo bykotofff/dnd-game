@@ -294,6 +294,15 @@ async def handle_websocket_message(
             pong_msg = WebSocketMessage("pong", {"timestamp": datetime.utcnow().isoformat()})
             await websocket.send_text(pong_msg.to_json())
 
+        elif message_type == "request_game_state":
+            await handle_request_game_state(websocket, game_id, user_id, user, message_data, db)
+
+        elif message_type == "request_message_history":
+            await handle_request_message_history(websocket, game_id, user_id, user, message_data, db)
+
+        elif message_type == "request_scene_info":
+            await handle_request_scene_info(websocket, game_id, user_id, user, message_data, db)
+
         else:
             logger.warning(f"Unknown message type: {message_type}")
             error_msg = WebSocketMessage("error", {"message": f"Unknown message type: {message_type}"})
@@ -353,6 +362,74 @@ async def handle_player_action(websocket: WebSocket, game_id: str, user_id: str,
     # Рассылаем всем игрокам
     await manager.broadcast_to_game(action_msg.to_json(), game_id)
 
+    # ✅ НОВОЕ: Автоматически запрашиваем ответ от ИИ
+    try:
+        # Получаем информацию об игре для контекста
+        from app.models.game import Game
+        from sqlalchemy import select
+
+        game_query = select(Game).where(Game.id == game_id)
+        result = await db.execute(game_query)
+        game = result.scalar_one_or_none()
+
+        if game:
+            # Подготавливаем контекст для ИИ
+            context = {
+                "game_name": game.name,
+                "current_scene": game.current_scene,
+                "player_action": action,
+                "player_name": user.username,
+                "game_id": game_id
+            }
+
+            # Отправляем запрос к ИИ асинхронно (не ждем ответа)
+            asyncio.create_task(handle_ai_response(game_id, action, context, user.username))
+
+    except Exception as ai_error:
+        logger.warning(f"Failed to trigger AI response: {ai_error}")
+
+
+async def handle_ai_response(game_id: str, player_action: str, context: dict, player_name: str):
+    """Асинхронная обработка ответа ИИ"""
+    try:
+        # Получаем ответ от ИИ
+        ai_response = await ai_service.get_dm_response(
+            player_message=player_action,
+            context=context
+        )
+
+        # Отправляем ответ ИИ всем игрокам через WebSocket
+        ai_msg = WebSocketMessage("ai_response", {
+            "message": ai_response,
+            "sender_name": "ИИ Мастер",
+            "timestamp": datetime.utcnow().isoformat(),
+            "in_response_to": player_action,
+            "responding_to_player": player_name
+        })
+
+        await manager.broadcast_to_game(ai_msg.to_json(), game_id)
+
+        logger.info(f"AI response sent for action by {player_name} in game {game_id}")
+
+    except Exception as e:
+        logger.error(f"Error generating AI response: {e}")
+
+        # Отправляем дефолтный ответ если ИИ недоступен
+        fallback_response = f"*ИИ Мастер обдумывает ответ на действие {player_name}...*"
+
+        fallback_msg = WebSocketMessage("ai_response", {
+            "message": fallback_response,
+            "sender_name": "ИИ Мастер",
+            "timestamp": datetime.utcnow().isoformat(),
+            "in_response_to": player_action,
+            "is_fallback": True
+        })
+
+        try:
+            await manager.broadcast_to_game(fallback_msg.to_json(), game_id)
+        except Exception as broadcast_error:
+            logger.error(f"Failed to send fallback AI response: {broadcast_error}")
+
 
 async def handle_dice_roll(websocket: WebSocket, game_id: str, user_id: str, user: User, data: Dict[str, Any], db: AsyncSession):
     """Обработка броска костей"""
@@ -402,3 +479,137 @@ async def get_game_players(game_id: str):
         "players": players,
         "player_count": len(players)
     }
+async def handle_request_game_state(websocket: WebSocket, game_id: str, user_id: str, user: User, data: Dict[str, Any], db: AsyncSession):
+    """Отправка текущего состояния игры"""
+    try:
+        # Получаем игру из базы данных
+        from app.models.game import Game
+        from sqlalchemy import select
+
+        game_query = select(Game).where(Game.id == game_id)
+        result = await db.execute(game_query)
+        game = result.scalar_one_or_none()
+
+        if not game:
+            error_msg = WebSocketMessage("error", {"message": "Game not found"})
+            await websocket.send_text(error_msg.to_json())
+            return
+
+        # Отправляем состояние игры
+        game_state_msg = WebSocketMessage("game_state_update", {
+            "game_id": str(game.id),
+            "game_name": game.name,
+            "current_scene": {
+                "description": game.current_scene or "Мастер готовит новое приключение для вашей партии. Скоро начнется увлекательное путешествие! Ваша группа собралась в уютной таверне, обсуждая предстоящие дела.",
+                "location": "Таверна 'Дракон и Дева'",
+                "weather": "Прохладный вечер",
+                "time_of_day": "Вечер",
+                "atmosphere": "В таверне слышен смех и звон кружек. Камин потрескивает, создавая уютную атмосферу. Бардец в углу наигрывает веселую мелодию."
+            },
+            "players_online": manager.get_game_players(game_id),
+            "timestamp": datetime.utcnow().isoformat()
+        })
+
+        await websocket.send_text(game_state_msg.to_json())
+
+        # Также отправляем историю сообщений
+        await handle_request_message_history(websocket, game_id, user_id, user, {"limit": 20}, db)
+
+    except Exception as e:
+        logger.error(f"Error sending game state: {e}")
+        error_msg = WebSocketMessage("error", {"message": "Failed to get game state"})
+        await websocket.send_text(error_msg.to_json())
+
+
+async def handle_request_message_history(websocket: WebSocket, game_id: str, user_id: str, user: User, data: Dict[str, Any], db: AsyncSession):
+    """Отправка истории сообщений"""
+    try:
+        limit = data.get("limit", 50)
+
+        # Получаем историю из Redis или создаем тестовые сообщения
+        try:
+            messages = await redis_client.get_game_messages(game_id, limit)
+        except:
+            messages = []
+
+        if not messages:
+            # Создаем начальное сообщение от ИИ мастера
+            messages = [{
+                "id": "initial-dm-message",
+                "type": "ai_dm",
+                "content": "🎲 Добро пожаловать в мир приключений! Ваша партия собралась в уютной таверне 'Дракон и Дева'. За окном начинает темнеть, а в камине весело потрескивают дрова. Трактирщик подает вам кружки эля и спрашивает о ваших планах. Что вы хотите делать?",
+                "sender_name": "ИИ Мастер",
+                "timestamp": datetime.utcnow().isoformat()
+            }]
+
+        history_msg = WebSocketMessage("message_history", {
+            "messages": messages,
+            "total_count": len(messages),
+            "timestamp": datetime.utcnow().isoformat()
+        })
+
+        await websocket.send_text(history_msg.to_json())
+
+    except Exception as e:
+        logger.error(f"Error sending message history: {e}")
+        error_msg = WebSocketMessage("error", {"message": "Failed to get message history"})
+        await websocket.send_text(error_msg.to_json())
+
+
+async def handle_request_scene_info(websocket: WebSocket, game_id: str, user_id: str, user: User, data: Dict[str, Any], db: AsyncSession):
+    """Отправка информации о текущей сцене"""
+    try:
+        # Получаем игру из базы данных
+        from app.models.game import Game
+        from sqlalchemy import select
+
+        game_query = select(Game).where(Game.id == game_id)
+        result = await db.execute(game_query)
+        game = result.scalar_one_or_none()
+
+        if not game:
+            error_msg = WebSocketMessage("error", {"message": "Game not found"})
+            await websocket.send_text(error_msg.to_json())
+            return
+
+        scene_msg = WebSocketMessage("scene_update", {
+            "description": game.current_scene or "Мастер готовит новое приключение для вашей партии. Скоро начнется увлекательное путешествие! Ваша группа собралась в уютной таверне, планируя предстоящие дела и наслаждаясь теплой атмосферой.",
+            "location": "Таверна 'Дракон и Дева'",
+            "weather": "Прохладный вечер",
+            "time_of_day": "Вечер",
+            "atmosphere": "В таверне слышен смех и звон кружек. Камин потрескивает, создавая уютную атмосферу. Свечи на столах мерцают, освещая лица собравшихся искателей приключений.",
+            "timestamp": datetime.utcnow().isoformat()
+        })
+
+        await websocket.send_text(scene_msg.to_json())
+
+    except Exception as e:
+        logger.error(f"Error sending scene info: {e}")
+        error_msg = WebSocketMessage("error", {"message": "Failed to get scene info"})
+        await websocket.send_text(error_msg.to_json())
+
+
+# Также обновите функцию send_initial_data, которая вызывается при подключении:
+async def send_initial_data(websocket: WebSocket, game_id: str, user_id: str, user: User, db: AsyncSession):
+    """Отправка начальных данных при подключении к игре"""
+    try:
+        # Отправляем приветственное сообщение о подключении
+        welcome_msg = WebSocketMessage("connected", {
+            "game_id": game_id,
+            "game_name": "Игровая сессия",
+            "user_id": user_id,
+            "username": user.username,
+            "players_online": manager.get_game_players(game_id),
+            "message": f"{user.username} присоединился к игре!",
+            "timestamp": datetime.utcnow().isoformat()
+        })
+
+        await websocket.send_text(welcome_msg.to_json())
+
+        # Автоматически отправляем текущее состояние игры
+        await handle_request_game_state(websocket, game_id, user_id, user, {}, db)
+
+    except Exception as e:
+        logger.error(f"Error sending initial data: {e}")
+        error_msg = WebSocketMessage("error", {"message": "Failed to send initial data"})
+        await websocket.send_text(error_msg.to_json())

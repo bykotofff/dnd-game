@@ -52,30 +52,6 @@ const Button = ({ children, onClick, variant = 'default', size = 'default', clas
     );
 };
 
-const Card = ({ children, className = '' }) => (
-    <div className={`bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm ${className}`}>
-        {children}
-    </div>
-);
-
-const CardHeader = ({ children, className = '' }) => (
-    <div className={`p-4 border-b border-gray-200 dark:border-gray-700 ${className}`}>
-        {children}
-    </div>
-);
-
-const CardContent = ({ children, className = '' }) => (
-    <div className={`p-4 ${className}`}>
-        {children}
-    </div>
-);
-
-const CardTitle = ({ children, className = '' }) => (
-    <h3 className={`font-semibold text-gray-900 dark:text-white ${className}`}>
-        {children}
-    </h3>
-);
-
 const GamePage = () => {
     // Параметры и навигация
     const { gameId } = useParams();
@@ -111,13 +87,15 @@ const GamePage = () => {
     const [isLoadingGame, setIsLoadingGame] = useState(false);
     const [loadError, setLoadError] = useState(null);
 
-    // Локальные состояния для fallback если gameStore не работает
+    // ✅ НОВОЕ: Локальные состояния для fallback если gameStore не работает
     const [localMessages, setLocalMessages] = useState([]);
     const [localPlayers, setLocalPlayers] = useState([]);
+    const [currentSceneLocal, setCurrentSceneLocal] = useState(null);
 
     // Используем локальные состояния как fallback
     const actualMessages = messages && messages.length > 0 ? messages : localMessages;
     const actualPlayers = players && players.length > 0 ? players : localPlayers;
+    const actualCurrentScene = currentScene || currentSceneLocal;
 
     // Загрузка игры при монтировании - упрощенный подход
     useEffect(() => {
@@ -182,6 +160,11 @@ const GamePage = () => {
                 if (data.players_online && Array.isArray(data.players_online)) {
                     setLocalPlayers(data.players_online);
                 }
+
+                // ✅ НОВОЕ: Запрашиваем текущее состояние игры
+                setTimeout(() => {
+                    websocketService.requestGameState();
+                }, 1000);
             });
 
             websocketService.on('message_history', (data) => {
@@ -196,6 +179,32 @@ const GamePage = () => {
                         timestamp: msg.timestamp || new Date().toISOString()
                     }));
                     setLocalMessages(formattedMessages);
+                }
+            });
+
+            // ✅ НОВОЕ: Обработчик обновления сцены
+            websocketService.on('scene_update', (data) => {
+                console.log('Received scene update:', data);
+                setCurrentSceneLocal({
+                    description: data.description || data.scene_description,
+                    location: data.location || 'Неизвестная локация',
+                    weather: data.weather || 'Ясно',
+                    time_of_day: data.time_of_day || 'День',
+                    atmosphere: data.atmosphere
+                });
+            });
+
+            // ✅ НОВОЕ: Обработчик обновления состояния игры
+            websocketService.on('game_state_update', (data) => {
+                console.log('Received game state update:', data);
+                if (data.current_scene) {
+                    setCurrentSceneLocal({
+                        description: data.current_scene.description || data.current_scene,
+                        location: data.current_scene.location || 'Неизвестная локация',
+                        weather: data.current_scene.weather || 'Ясно',
+                        time_of_day: data.current_scene.time_of_day || 'День',
+                        atmosphere: data.current_scene.atmosphere
+                    });
                 }
             });
 
@@ -323,22 +332,16 @@ const GamePage = () => {
         if (!actionInput.trim() || !gameId) return;
 
         try {
-            // Отправляем действие через WebSocket для немедленного отображения
+            // Отправляем действие через WebSocket
             const success = websocketService.sendPlayerAction(actionInput.trim());
             if (!success) {
                 throw new Error('WebSocket не подключен');
             }
 
-            // Также отправляем на backend для обработки ИИ (асинхронно)
-            gameService.getAiResponse(gameId, actionInput.trim(), {
-                current_scene: currentScene?.description,
-                players: players?.length || 0
-            }).catch(error => {
-                console.error('AI response failed:', error);
-                // Не показываем ошибку пользователю - ИИ может ответить позже
-            });
-
             setActionInput('');
+
+            // ✅ УБРАЛИ вызов gameService.getAiResponse - ИИ будет отвечать автоматически через WebSocket
+
         } catch (error) {
             console.error('Failed to send action:', error);
             setLoadError('Не удалось отправить действие: ' + error.message);
@@ -476,8 +479,8 @@ const GamePage = () => {
                             <div className="flex items-center space-x-2">
                                 <connectionStatus.icon className={`w-4 h-4 ${connectionStatus.color}`} />
                                 <span className={`text-sm ${connectionStatus.color}`}>
-                                        {connectionStatus.text}
-                                    </span>
+                                    {connectionStatus.text}
+                                </span>
                             </div>
 
                             {/* Кнопки управления */}
@@ -506,7 +509,7 @@ const GamePage = () => {
                 <div className="flex-1 flex min-h-0">
                     {/* Main content area */}
                     <div className="flex-1 flex flex-col min-w-0">
-                        {/* Scene panel - исправлена проблема с показом деталей */}
+                        {/* Scene panel - ✅ ИСПРАВЛЕНО: Используем actualCurrentScene */}
                         <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 p-4">
                             <div className="flex items-center justify-between mb-2">
                                 <h3 className="font-semibold text-lg flex items-center">
@@ -527,16 +530,16 @@ const GamePage = () => {
                             <div className={`transition-all duration-300 ${showDetails ? 'max-h-96 overflow-y-auto' : 'max-h-20 overflow-hidden'}`}>
                                 <div className="space-y-2">
                                     <div className="text-sm font-medium text-gray-600 dark:text-gray-300">
-                                        📍 {currentScene?.location || 'Неизвестная локация'} •
-                                        🌤️ {currentScene?.weather || 'Ясно'} •
-                                        🕒 {currentScene?.time_of_day || 'День'}
+                                        📍 {actualCurrentScene?.location || 'Неизвестная локация'} •
+                                        🌤️ {actualCurrentScene?.weather || 'Ясно'} •
+                                        🕒 {actualCurrentScene?.time_of_day || 'День'}
                                     </div>
                                     <div className="text-sm leading-relaxed text-gray-700 dark:text-gray-300">
-                                        {currentScene?.description || 'Описание сцены недоступно. Мастер готовит новое приключение...'}
+                                        {actualCurrentScene?.description || 'Описание сцены недоступно. Мастер готовит новое приключение...'}
                                     </div>
-                                    {currentScene?.atmosphere && (
+                                    {actualCurrentScene?.atmosphere && (
                                         <div className="text-xs text-gray-500 dark:text-gray-400 italic">
-                                            {currentScene.atmosphere}
+                                            {actualCurrentScene.atmosphere}
                                         </div>
                                     )}
                                 </div>
@@ -560,12 +563,12 @@ const GamePage = () => {
                                         className={`p-3 rounded-lg border ${getMessageStyle(message.type)} shadow-sm`}
                                     >
                                         <div className="flex items-center justify-between mb-1">
-                                                <span className="font-semibold text-sm">
-                                                    {message.sender || message.sender_name || 'Неизвестный'}
-                                                </span>
+                                            <span className="font-semibold text-sm">
+                                                {message.sender || message.sender_name || 'Неизвестный'}
+                                            </span>
                                             <span className="text-xs opacity-60">
-                                                    {new Date(message.timestamp).toLocaleTimeString()}
-                                                </span>
+                                                {new Date(message.timestamp).toLocaleTimeString()}
+                                            </span>
                                         </div>
                                         <p className="text-sm leading-relaxed">{message.content}</p>
                                     </div>
@@ -573,7 +576,7 @@ const GamePage = () => {
                             )}
                         </div>
 
-                        {/* Quick Actions - улучшенные кнопки в компактной панели */}
+                        {/* Quick Actions */}
                         <div className="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 p-3">
                             <div className="flex items-center space-x-2">
                                 <span className="text-sm font-medium text-gray-600 dark:text-gray-300">Быстрые действия:</span>
@@ -592,7 +595,7 @@ const GamePage = () => {
                             </div>
                         </div>
 
-                        {/* Player Actions Input - увеличенное поле ввода */}
+                        {/* Player Actions Input */}
                         <div className="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 p-4">
                             <div className="space-y-3">
                                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -600,22 +603,22 @@ const GamePage = () => {
                                     Действия персонажа:
                                 </label>
                                 <div className="flex space-x-2">
-                                        <textarea
-                                            value={actionInput}
-                                            onChange={(e) => setActionInput(e.target.value)}
-                                            onKeyDown={(e) => {
-                                                if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-                                                    handleActionSubmit();
-                                                }
-                                            }}
-                                            placeholder={!wsConnected ?
-                                                "Отключено от сервера..." :
-                                                "Опишите что делает ваш персонаж... (Ctrl+Enter для отправки)"
+                                    <textarea
+                                        value={actionInput}
+                                        onChange={(e) => setActionInput(e.target.value)}
+                                        onKeyDown={(e) => {
+                                            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                                                handleActionSubmit();
                                             }
-                                            disabled={!wsConnected}
-                                            className="flex-1 px-3 py-2 min-h-[100px] bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none disabled:opacity-50"
-                                            rows={4}
-                                        />
+                                        }}
+                                        placeholder={!wsConnected ?
+                                            "Отключено от сервера..." :
+                                            "Опишите что делает ваш персонаж... (Ctrl+Enter для отправки)"
+                                        }
+                                        disabled={!wsConnected}
+                                        className="flex-1 px-3 py-2 min-h-[100px] bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none disabled:opacity-50"
+                                        rows={4}
+                                    />
                                     <Button
                                         onClick={handleActionSubmit}
                                         disabled={!actionInput.trim() || !wsConnected}
@@ -630,7 +633,7 @@ const GamePage = () => {
                             </div>
                         </div>
 
-                        {/* Dice Panel - восстановленный интерфейс кубиков */}
+                        {/* Dice Panel */}
                         <div className="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 p-4">
                             <h4 className="font-semibold mb-3 flex items-center text-gray-900 dark:text-white">
                                 <CubeIcon className="w-5 h-5 mr-2" />
@@ -655,8 +658,8 @@ const GamePage = () => {
                                             −
                                         </button>
                                         <span className="text-sm min-w-[2rem] text-center font-mono">
-                                                {diceModifier > 0 ? '+' : ''}{diceModifier}
-                                            </span>
+                                            {diceModifier > 0 ? '+' : ''}{diceModifier}
+                                        </span>
                                         <button
                                             onClick={() => setDiceModifier(Math.min(10, diceModifier + 1))}
                                             className="px-2 py-1 text-sm bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-200 rounded hover:bg-gray-300 dark:hover:bg-gray-500"
@@ -682,7 +685,7 @@ const GamePage = () => {
 
                     {/* Right sidebar - игроки и чат */}
                     <div className="w-80 border-l border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 flex flex-col">
-                        {/* Players Panel - теперь скрываемая */}
+                        {/* Players Panel */}
                         <div className="border-b border-gray-200 dark:border-gray-700">
                             <button
                                 onClick={() => setPlayersCollapsed(!playersCollapsed)}
@@ -691,8 +694,8 @@ const GamePage = () => {
                                 <div className="flex items-center">
                                     <UsersIcon className="w-5 h-5 mr-2" />
                                     <span className="font-semibold">
-                                            Игроки ({(actualPlayers || []).filter(p => p.isOnline || p.is_online).length}/{(actualPlayers || []).length})
-                                        </span>
+                                        Игроки ({(actualPlayers || []).filter(p => p.isOnline || p.is_online).length}/{(actualPlayers || []).length})
+                                    </span>
                                 </div>
                                 {playersCollapsed ? <ChevronDownIcon className="w-4 h-4" /> : <ChevronUpIcon className="w-4 h-4" />}
                             </button>
@@ -720,12 +723,12 @@ const GamePage = () => {
                                                             player.isOnline || player.is_online ? 'bg-green-500' : 'bg-gray-400'
                                                         }`} />
                                                         <span className="font-medium text-sm">
-                                                                {player.name || player.username || player.character_name}
-                                                            </span>
+                                                            {player.name || player.username || player.character_name}
+                                                        </span>
                                                         {(player.isCurrentTurn || player.is_current_turn) && (
                                                             <span className="px-1 py-0.5 text-xs bg-yellow-200 dark:bg-yellow-800 text-yellow-800 dark:text-yellow-200 rounded">
-                                                                    Ход
-                                                                </span>
+                                                                Ход
+                                                            </span>
                                                         )}
                                                     </div>
                                                     <div className="text-xs text-gray-500 dark:text-gray-400">
@@ -770,7 +773,7 @@ const GamePage = () => {
                             )}
                         </div>
 
-                        {/* Chat - увеличенная область чата */}
+                        {/* Chat */}
                         <div className="flex-1 flex flex-col min-h-0">
                             <div className="p-3 border-b border-gray-200 dark:border-gray-700">
                                 <h3 className="font-semibold flex items-center">
@@ -780,7 +783,6 @@ const GamePage = () => {
                             </div>
 
                             <div className="flex-1 overflow-y-auto p-3 space-y-2 bg-gray-50 dark:bg-gray-900 min-h-[200px]">
-                                {/* Фильтруем сообщения чата из общих сообщений */}
                                 {actualMessages?.filter(msg => msg.type === 'chat' || msg.message_type === 'chat').length > 0 ? (
                                     actualMessages
                                         .filter(msg => msg.type === 'chat' || msg.message_type === 'chat')
@@ -800,7 +802,7 @@ const GamePage = () => {
                                 )}
                             </div>
 
-                            {/* Chat input - улучшенное поле ввода */}
+                            {/* Chat input */}
                             <div className="p-3 border-t border-gray-200 dark:border-gray-700">
                                 <div className="flex space-x-2">
                                     <input

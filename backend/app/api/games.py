@@ -12,6 +12,8 @@ from app.models.game import Game, GameStatus
 from app.models.campaign import Campaign
 from app.models.user import User
 from app.api.auth import get_current_user
+from app.services.ai_service import ai_service
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -70,6 +72,15 @@ class GameDetailResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+class AiResponseRequest(BaseModel):
+    message: str
+    context: Optional[Dict[str, Any]] = None
+
+class AiResponseData(BaseModel):
+    response: str
+    context_used: Optional[Dict[str, Any]] = None
+    suggestions: Optional[List[str]] = None
 
 
 @router.post("/", response_model=GameResponse)
@@ -710,6 +721,98 @@ async def get_game_messages(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to get messages"
+        )
+
+@router.post("/{game_id}/ai-response", response_model=AiResponseData)
+async def get_ai_response(
+        game_id: str,
+        request_data: AiResponseRequest,
+        current_user: User = Depends(get_current_user),
+        db: AsyncSession = Depends(get_db_session)
+):
+    """Получить ответ от ИИ-мастера"""
+    try:
+        # Проверяем существование игры и права доступа
+        query = select(Game).where(Game.id == game_id)
+        result = await db.execute(query)
+        game = result.scalar_one_or_none()
+
+        if not game:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Game not found"
+            )
+
+        # Проверяем права доступа
+        campaign_query = select(Campaign).where(Campaign.id == game.campaign_id)
+        campaign_result = await db.execute(campaign_query)
+        campaign = campaign_result.scalar_one()
+
+        user_id = str(current_user.id)
+        is_player = user_id in (game.players or [])
+        is_creator = str(campaign.creator_id) == user_id
+        is_participant = user_id in (campaign.players or [])
+
+        if not (is_player or is_creator or is_participant):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied"
+            )
+
+        # Получаем ответ от ИИ
+        try:
+            # Подготавливаем контекст для ИИ
+            context = request_data.context or {}
+            context.update({
+                "game_name": game.name,
+                "current_scene": game.current_scene,
+                "player_message": request_data.message,
+                "player_name": current_user.username
+            })
+
+            # Отправляем запрос к ИИ сервису
+            ai_response = await ai_service.get_dm_response(
+                player_message=request_data.message,
+                context=context
+            )
+
+            # Отправляем ответ ИИ через WebSocket всем игрокам в игре
+            try:
+                from app.api.websocket import manager, WebSocketMessage
+                ai_msg = WebSocketMessage("ai_response", {
+                    "message": ai_response,
+                    "sender_name": "ИИ Мастер",
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "in_response_to": request_data.message
+                })
+                await manager.broadcast_to_game(ai_msg.to_json(), game_id)
+            except Exception as ws_error:
+                logger.warning(f"Failed to broadcast AI response via WebSocket: {ws_error}")
+
+            return AiResponseData(
+                response=ai_response,
+                context_used=context,
+                suggestions=[]  # Можно добавить логику для предложений
+            )
+
+        except Exception as ai_error:
+            logger.error(f"AI service error: {ai_error}")
+            # Возвращаем дефолтный ответ если ИИ недоступен
+            default_response = "ИИ Мастер временно недоступен. Попробуйте позже или продолжите игру без ИИ."
+
+            return AiResponseData(
+                response=default_response,
+                context_used=context,
+                suggestions=["Исследовать окрестности", "Поговорить с местными жителями", "Проверить инвентарь"]
+            )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting AI response for game {game_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to get AI response"
         )
 
 
