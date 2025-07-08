@@ -1011,177 +1011,178 @@ const GamePage = () => {
                             </div>
                         </div>
 
-                    {/* Right sidebar - игроки и чат */}
-                    <div className="w-80 border-l border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 flex flex-col">
-                        {/* Players Panel */}
-                        <div className="border-b border-gray-200 dark:border-gray-700">
-                            <button
-                                onClick={() => setPlayersCollapsed(!playersCollapsed)}
-                                className="w-full p-3 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-                            >
-                                <div className="flex items-center">
-                                    <UsersIcon className="w-5 h-5 mr-2" />
-                                    <span className="font-semibold">
+                        {/* Right sidebar - игроки и чат */}
+                        <div className="w-80 border-l border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 flex flex-col">
+                            {/* Players Panel */}
+                            <div className="border-b border-gray-200 dark:border-gray-700">
+                                <button
+                                    onClick={() => setPlayersCollapsed(!playersCollapsed)}
+                                    className="w-full p-3 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                                >
+                                    <div className="flex items-center">
+                                        <UsersIcon className="w-5 h-5 mr-2" />
+                                        <span className="font-semibold">
                                         Игроки ({(actualPlayers || []).filter(p => p.isOnline || p.is_online).length}/{(actualPlayers || []).length})
                                     </span>
-                                </div>
-                                {playersCollapsed ? <ChevronDownIcon className="w-4 h-4" /> : <ChevronUpIcon className="w-4 h-4" />}
-                            </button>
+                                    </div>
+                                    {playersCollapsed ? <ChevronDownIcon className="w-4 h-4" /> : <ChevronUpIcon className="w-4 h-4" />}
+                                </button>
 
-                            {!playersCollapsed && (
-                                <div className="px-3 pb-3 space-y-2">
-                                    {(!actualPlayers || actualPlayers.length === 0) ? (
-                                        <div className="text-center text-gray-500 dark:text-gray-400 py-4">
-                                            <UsersIcon className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                                            <p className="text-sm">Игроки подключаются...</p>
-                                        </div>
-                                    ) : (
-                                        actualPlayers.map((player) => (
-                                            <div
-                                                key={player.id || player.user_id}
-                                                className={`p-2 rounded-lg border ${
-                                                    player.isCurrentTurn || player.is_current_turn ? 'bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 dark:border-yellow-700' :
-                                                        player.isOnline || player.is_online ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-700' :
-                                                            'bg-gray-50 dark:bg-gray-700 border-gray-200 dark:border-gray-600'
-                                                }`}
-                                            >
-                                                <div className="flex items-center justify-between">
-                                                    <div className="flex items-center space-x-2">
-                                                        <div className={`w-2 h-2 rounded-full ${
-                                                            player.isOnline || player.is_online ? 'bg-green-500' : 'bg-gray-400'
-                                                        }`} />
-                                                        <span className="font-medium text-sm">
+                                {!playersCollapsed && (
+                                    <div className="px-3 pb-3 space-y-2">
+                                        {(!actualPlayers || actualPlayers.length === 0) ? (
+                                            <div className="text-center text-gray-500 dark:text-gray-400 py-4">
+                                                <UsersIcon className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                                                <p className="text-sm">Игроки подключаются...</p>
+                                            </div>
+                                        ) : (
+                                            actualPlayers.map((player) => (
+                                                <div
+                                                    key={player.id || player.user_id}
+                                                    className={`p-2 rounded-lg border ${
+                                                        player.isCurrentTurn || player.is_current_turn ? 'bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 dark:border-yellow-700' :
+                                                            player.isOnline || player.is_online ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-700' :
+                                                                'bg-gray-50 dark:bg-gray-700 border-gray-200 dark:border-gray-600'
+                                                    }`}
+                                                >
+                                                    <div className="flex items-center justify-between">
+                                                        <div className="flex items-center space-x-2">
+                                                            <div className={`w-2 h-2 rounded-full ${
+                                                                player.isOnline || player.is_online ? 'bg-green-500' : 'bg-gray-400'
+                                                            }`} />
+                                                            <span className="font-medium text-sm">
                                                             {player.name || player.username || player.character_name}
                                                         </span>
-                                                        {(player.isCurrentTurn || player.is_current_turn) && (
-                                                            <span className="px-1 py-0.5 text-xs bg-yellow-200 dark:bg-yellow-800 text-yellow-800 dark:text-yellow-200 rounded">
+                                                            {(player.isCurrentTurn || player.is_current_turn) && (
+                                                                <span className="px-1 py-0.5 text-xs bg-yellow-200 dark:bg-yellow-800 text-yellow-800 dark:text-yellow-200 rounded">
                                                                 Ход
                                                             </span>
-                                                        )}
-                                                    </div>
-                                                    <div className="text-xs text-gray-500 dark:text-gray-400">
-                                                        {player.initiative || '—'}
-                                                    </div>
-                                                </div>
-                                                <div className="text-xs text-gray-600 dark:text-gray-400 mt-1">
-                                                    {player.character || player.character_name || 'Персонаж не выбран'}
-                                                </div>
-                                                {(player.hp || (player.current_hp !== undefined && player.max_hp !== undefined)) && (
-                                                    <div className="flex items-center justify-between mt-2">
-                                                        <div className="text-xs text-gray-600 dark:text-gray-400">
-                                                            HP: {player.hp ? `${player.hp.current}/${player.hp.max}` : `${player.current_hp}/${player.max_hp}`}
+                                                            )}
                                                         </div>
-                                                        <div className="flex-1 mx-2">
-                                                            <div className="h-1 bg-gray-200 dark:bg-gray-600 rounded-full overflow-hidden">
-                                                                <div
-                                                                    className="h-full bg-green-500 transition-all duration-300"
-                                                                    style={{
-                                                                        width: `${player.hp ?
-                                                                            (player.hp.current / player.hp.max) * 100 :
-                                                                            (player.current_hp / player.max_hp) * 100
-                                                                        }%`
-                                                                    }}
-                                                                />
+                                                        <div className="text-xs text-gray-500 dark:text-gray-400">
+                                                            {player.initiative || '—'}
+                                                        </div>
+                                                    </div>
+                                                    <div className="text-xs text-gray-600 dark:text-gray-400 mt-1">
+                                                        {player.character || player.character_name || 'Персонаж не выбран'}
+                                                    </div>
+                                                    {(player.hp || (player.current_hp !== undefined && player.max_hp !== undefined)) && (
+                                                        <div className="flex items-center justify-between mt-2">
+                                                            <div className="text-xs text-gray-600 dark:text-gray-400">
+                                                                HP: {player.hp ? `${player.hp.current}/${player.hp.max}` : `${player.current_hp}/${player.max_hp}`}
+                                                            </div>
+                                                            <div className="flex-1 mx-2">
+                                                                <div className="h-1 bg-gray-200 dark:bg-gray-600 rounded-full overflow-hidden">
+                                                                    <div
+                                                                        className="h-full bg-green-500 transition-all duration-300"
+                                                                        style={{
+                                                                            width: `${player.hp ?
+                                                                                (player.hp.current / player.hp.max) * 100 :
+                                                                                (player.current_hp / player.max_hp) * 100
+                                                                            }%`
+                                                                        }}
+                                                                    />
+                                                                </div>
                                                             </div>
                                                         </div>
-                                                    </div>
-                                                )}
-                                            </div>
-                                        ))
-                                    )}
-                                    <div className="flex gap-2 mt-3">
-                                        <Button variant="outline" size="sm" className="flex-1 text-xs">
-                                            Сменить персонажа
-                                        </Button>
-                                        <Button variant="ghost" size="sm" className="flex-1 text-xs">
-                                            Пригласить игроков
-                                        </Button>
+                                                    )}
+                                                </div>
+                                            ))
+                                        )}
+                                        <div className="flex gap-2 mt-3">
+                                            <Button variant="outline" size="sm" className="flex-1 text-xs">
+                                                Сменить персонажа
+                                            </Button>
+                                            <Button variant="ghost" size="sm" className="flex-1 text-xs">
+                                                Пригласить игроков
+                                            </Button>
+                                        </div>
                                     </div>
-                                </div>
-                            )}
-                        </div>
+                                )}
+                            </div>
 
-                        {/* Chat */}
-                        <div className="flex-1 flex flex-col min-h-0">
-                            <div className="p-3 border-b border-gray-200 dark:border-gray-700">
-                                <h3 className="font-semibold flex items-center">
-                                    <ChatBubbleLeftIcon className="w-5 h-5 mr-2" />
-                                    Чат игроков
-                                    <span className="ml-auto text-xs text-gray-500 dark:text-gray-400">
+                            {/* Chat */}
+                            <div className="flex-1 flex flex-col min-h-0">
+                                <div className="p-3 border-b border-gray-200 dark:border-gray-700">
+                                    <h3 className="font-semibold flex items-center">
+                                        <ChatBubbleLeftIcon className="w-5 h-5 mr-2" />
+                                        Чат игроков
+                                        <span className="ml-auto text-xs text-gray-500 dark:text-gray-400">
                                         Только общение
                                     </span>
-                                </h3>
-                            </div>
+                                    </h3>
+                                </div>
 
-                            <div className="flex-1 overflow-y-auto p-3 space-y-2 bg-gray-50 dark:bg-gray-900 min-h-[200px]">
-                                {(() => {
-                                    const chatMessages = actualMessages?.filter(msg =>
-                                        msg.type === 'chat' || msg.message_type === 'chat'
-                                    ) || [];
+                                <div className="flex-1 overflow-y-auto p-3 space-y-2 bg-gray-50 dark:bg-gray-900 min-h-[200px]">
+                                    {(() => {
+                                        const chatMessages = actualMessages?.filter(msg =>
+                                            msg.type === 'chat' || msg.message_type === 'chat'
+                                        ) || [];
 
-                                    if (chatMessages.length === 0) {
-                                        return (
-                                            <div className="text-center text-gray-500 dark:text-gray-400 py-8">
-                                                <ChatBubbleLeftIcon className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                                                <p className="text-sm font-medium mb-1">Чат пуст</p>
-                                                <p className="text-xs">Общайтесь с другими игроками здесь!</p>
-                                                <p className="text-xs mt-2 text-blue-500">
-                                                    💡 Игровые действия отображаются в основной области
-                                                </p>
-                                            </div>
-                                        );
-                                    }
-
-                                    return chatMessages.map((message) => (
-                                        <div key={message.id} className="p-2 rounded bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-colors">
-                                            <div className="flex items-center justify-between mb-1">
-                                                <div className="text-xs text-blue-700 dark:text-blue-300 font-medium flex items-center">
-                                                    <span className="w-2 h-2 bg-blue-500 rounded-full mr-2"></span>
-                                                    {message.sender || message.sender_name || message.author}
+                                        if (chatMessages.length === 0) {
+                                            return (
+                                                <div className="text-center text-gray-500 dark:text-gray-400 py-8">
+                                                    <ChatBubbleLeftIcon className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                                                    <p className="text-sm font-medium mb-1">Чат пуст</p>
+                                                    <p className="text-xs">Общайтесь с другими игроками здесь!</p>
+                                                    <p className="text-xs mt-2 text-blue-500">
+                                                        💡 Игровые действия отображаются в основной области
+                                                    </p>
                                                 </div>
-                                                <div className="text-xs text-blue-600 dark:text-blue-400 opacity-60">
-                                                    {new Date(message.timestamp).toLocaleTimeString()}
+                                            );
+                                        }
+
+                                        return chatMessages.map((message) => (
+                                            <div key={message.id} className="p-2 rounded bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-colors">
+                                                <div className="flex items-center justify-between mb-1">
+                                                    <div className="text-xs text-blue-700 dark:text-blue-300 font-medium flex items-center">
+                                                        <span className="w-2 h-2 bg-blue-500 rounded-full mr-2"></span>
+                                                        {message.sender || message.sender_name || message.author}
+                                                    </div>
+                                                    <div className="text-xs text-blue-600 dark:text-blue-400 opacity-60">
+                                                        {new Date(message.timestamp).toLocaleTimeString()}
+                                                    </div>
+                                                </div>
+                                                <div className="text-sm text-blue-900 dark:text-blue-100 leading-relaxed">
+                                                    {message.content}
                                                 </div>
                                             </div>
-                                            <div className="text-sm text-blue-900 dark:text-blue-100 leading-relaxed">
-                                                {message.content}
-                                            </div>
+                                        ));
+                                    })()}
+                                </div>
+
+                                <div className="p-3 border-t border-gray-200 dark:border-gray-700">
+                                    <div className="space-y-2">
+                                        <div className="flex space-x-2">
+                                            <input
+                                                type="text"
+                                                value={chatInput}
+                                                onChange={(e) => setChatInput(e.target.value)}
+                                                onKeyDown={(e) => {
+                                                    if (e.key === 'Enter') {
+                                                        handleChatSubmit();
+                                                    }
+                                                }}
+                                                placeholder={wsConnected ? "Напишите сообщение другим игрокам..." : "Отключено от сервера"}
+                                                disabled={!wsConnected}
+                                                className="flex-1 px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm disabled:opacity-50"
+                                            />
+                                            <Button
+                                                onClick={handleChatSubmit}
+                                                disabled={!chatInput.trim() || !wsConnected}
+                                                size="sm"
+                                                title="Отправить сообщение в чат"
+                                            >
+                                                <PaperAirplaneIcon className="w-4 h-4" />
+                                            </Button>
                                         </div>
-                                    ));
-                                })()}
-                            </div>
-
-                            <div className="p-3 border-t border-gray-200 dark:border-gray-700">
-                                <div className="space-y-2">
-                                    <div className="flex space-x-2">
-                                        <input
-                                            type="text"
-                                            value={chatInput}
-                                            onChange={(e) => setChatInput(e.target.value)}
-                                            onKeyDown={(e) => {
-                                                if (e.key === 'Enter') {
-                                                    handleChatSubmit();
-                                                }
-                                            }}
-                                            placeholder={wsConnected ? "Напишите сообщение другим игрокам..." : "Отключено от сервера"}
-                                            disabled={!wsConnected}
-                                            className="flex-1 px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm disabled:opacity-50"
-                                        />
-                                        <Button
-                                            onClick={handleChatSubmit}
-                                            disabled={!chatInput.trim() || !wsConnected}
-                                            size="sm"
-                                            title="Отправить сообщение в чат"
-                                        >
-                                            <PaperAirplaneIcon className="w-4 h-4" />
-                                        </Button>
+                                        {!wsConnected && (
+                                            <p className="text-xs text-red-500">Отключено от сервера</p>
+                                        )}
+                                        <p className="text-xs text-gray-500 dark:text-gray-400">
+                                            💬 Это чат для общения между игроками. Игровые действия вводите в поле выше.
+                                        </p>
                                     </div>
-                                    {!wsConnected && (
-                                        <p className="text-xs text-red-500">Отключено от сервера</p>
-                                    )}
-                                    <p className="text-xs text-gray-500 dark:text-gray-400">
-                                        💬 Это чат для общения между игроками. Игровые действия вводите в поле выше.
-                                    </p>
                                 </div>
                             </div>
                         </div>
@@ -1189,7 +1190,7 @@ const GamePage = () => {
                 </div>
             </div>
         </div>
-    );
-};
+            );
+            };
 
-export default GamePage;
+            export default GamePage;
