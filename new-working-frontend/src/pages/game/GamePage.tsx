@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -16,8 +16,43 @@ import {
     CubeIcon,
     ChevronDownIcon,
     ChevronUpIcon,
-    SpeakerXMarkIcon
+    SpeakerXMarkIcon,
+    MapIcon,
+    SparklesIcon,
+    FireIcon,
+    HeartIcon,
+    ShieldCheckIcon,
+    StarIcon,
+    BoltIcon,
+    MoonIcon,
+    SunIcon,
+    CloudIcon,
+    BeakerIcon,
+    BookOpenIcon,
+    UserIcon,
+    UserCircleIcon,
+    MicrophoneIcon,
+    VideoCameraIcon,
+    PhoneIcon,
+    PhoneXMarkIcon,
+    PlayIcon,
+    PauseIcon,
+    EllipsisVerticalIcon,
+    CommandLineIcon
 } from '@heroicons/react/24/outline';
+import {
+    CheckCircleIcon as CheckCircleSolid,
+    WifiIcon as WifiSolid,
+    HeartIcon as HeartSolid,
+    ShieldCheckIcon as ShieldCheckSolid,
+    StarIcon as StarSolid,
+    UserIcon as UserSolid,
+    MoonIcon as MoonSolid,
+    SunIcon as SunSolid,
+    CloudIcon as CloudSolid,
+    FireIcon as FireSolid,
+    BoltIcon as BoltSolid
+} from '@heroicons/react/24/solid';
 
 // Импорт реальных сервисов
 import { useGameStore } from '../../store/gameStore';
@@ -25,23 +60,40 @@ import { useAuth } from '../../store/authStore';
 import { gameService } from '../../services/gameService';
 import { websocketService } from '../../services/websocketService';
 
-// Имитация существующих компонентов
-const Button = ({ children, onClick, variant = 'default', size = 'default', className = '', disabled = false, ...props }) => {
+// Базовый компонент Button
+const Button = ({
+                    children,
+                    onClick,
+                    variant = 'default',
+                    size = 'default',
+                    className = '',
+                    disabled = false,
+                    type = 'button',
+                    ...props
+                }) => {
     const baseStyles = 'inline-flex items-center justify-center rounded-md font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed';
     const variants = {
         default: 'bg-blue-600 text-white hover:bg-blue-700 focus:ring-blue-500',
-        ghost: 'text-gray-400 hover:bg-gray-700 hover:text-white',
-        outline: 'border border-gray-600 text-gray-300 hover:bg-gray-700',
-        secondary: 'bg-gray-600 text-white hover:bg-gray-700'
+        ghost: 'text-gray-400 hover:bg-gray-700 hover:text-white focus:ring-gray-500',
+        outline: 'border border-gray-600 text-gray-300 hover:bg-gray-700 focus:ring-gray-500',
+        secondary: 'bg-gray-600 text-white hover:bg-gray-700 focus:ring-gray-500',
+        danger: 'bg-red-600 text-white hover:bg-red-700 focus:ring-red-500',
+        success: 'bg-green-600 text-white hover:bg-green-700 focus:ring-green-500',
+        warning: 'bg-yellow-600 text-white hover:bg-yellow-700 focus:ring-yellow-500',
+        magic: 'bg-purple-600 text-white hover:bg-purple-700 focus:ring-purple-500',
+        dice: 'bg-gradient-to-r from-blue-500 to-purple-600 text-white hover:from-blue-600 hover:to-purple-700 focus:ring-blue-500'
     };
     const sizes = {
-        sm: 'px-2 py-1 text-sm',
+        xs: 'px-2 py-1 text-xs',
+        sm: 'px-3 py-1.5 text-sm',
         default: 'px-4 py-2 text-sm',
-        lg: 'px-6 py-3 text-base'
+        lg: 'px-6 py-3 text-base',
+        xl: 'px-8 py-4 text-lg'
     };
 
     return (
         <button
+            type={type}
             onClick={onClick}
             disabled={disabled}
             className={`${baseStyles} ${variants[variant]} ${sizes[size]} ${className}`}
@@ -50,6 +102,187 @@ const Button = ({ children, onClick, variant = 'default', size = 'default', clas
             {children}
         </button>
     );
+};
+
+// Компонент для отображения кубика
+const DiceIcon = ({ sides, className = "w-6 h-6" }) => {
+    const diceVariants = {
+        d4: "🔺",
+        d6: "⚀",
+        d8: "🔶",
+        d10: "🔟",
+        d12: "🔮",
+        d20: "🎲",
+        d100: "💯"
+    };
+
+    return (
+        <span className={`${className} inline-flex items-center justify-center text-lg`}>
+            {diceVariants[sides] || '🎲'}
+        </span>
+    );
+};
+
+// Компонент для игрока
+const PlayerCard = ({ player, isCurrentUser = false, isOnline = true, className = "" }) => {
+    const statusColor = isOnline ? "bg-green-500" : "bg-gray-400";
+    const borderColor = isCurrentUser ? "border-blue-500" : "border-gray-600";
+
+    return (
+        <div className={`
+            relative p-3 rounded-lg border-2 transition-all duration-200 
+            ${borderColor} 
+            ${isCurrentUser ? 'bg-blue-50 dark:bg-blue-900/20' : 'bg-white dark:bg-gray-800'}
+            ${className}
+        `}>
+            <div className="flex items-center space-x-3">
+                <div className="relative">
+                    <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white font-bold">
+                        {player.character_name?.[0] || player.username?.[0] || 'U'}
+                    </div>
+                    <div className={`absolute -bottom-1 -right-1 w-3 h-3 rounded-full border-2 border-white dark:border-gray-800 ${statusColor}`}></div>
+                </div>
+                <div className="flex-1 min-w-0">
+                    <div className="flex items-center space-x-2">
+                        <p className="font-medium text-gray-900 dark:text-white truncate">
+                            {player.character_name || 'Безымянный персонаж'}
+                        </p>
+                        {isCurrentUser && (
+                            <span className="px-2 py-1 text-xs bg-blue-500 text-white rounded-full">Вы</span>
+                        )}
+                    </div>
+                    <p className="text-sm text-gray-600 dark:text-gray-400 truncate">
+                        {player.username || 'Игрок'}
+                    </p>
+                    {player.current_hp !== undefined && player.max_hp !== undefined && (
+                        <div className="flex items-center space-x-2 mt-1">
+                            <HeartSolid className="w-4 h-4 text-red-500" />
+                            <span className="text-sm text-gray-600 dark:text-gray-400">
+                                {player.current_hp}/{player.max_hp}
+                            </span>
+                        </div>
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+};
+
+// Компонент для сообщения чата
+const ChatMessage = ({ message, isCurrentUser = false }) => {
+    const messageTime = new Date(message.timestamp).toLocaleTimeString('ru-RU', {
+        hour: '2-digit',
+        minute: '2-digit'
+    });
+
+    const getMessageIcon = () => {
+        switch (message.type) {
+            case 'action':
+                return <CommandLineIcon className="w-4 h-4 text-purple-500" />;
+            case 'roll':
+                return <CubeIcon className="w-4 h-4 text-blue-500" />;
+            case 'dm':
+                return <SparklesIcon className="w-4 h-4 text-yellow-500" />;
+            case 'ooc':
+                return <ChatBubbleLeftIcon className="w-4 h-4 text-gray-500" />;
+            default:
+                return <UserIcon className="w-4 h-4 text-gray-500" />;
+        }
+    };
+
+    const getMessageColor = () => {
+        switch (message.type) {
+            case 'action':
+                return 'text-purple-600 dark:text-purple-400';
+            case 'roll':
+                return 'text-blue-600 dark:text-blue-400';
+            case 'dm':
+                return 'text-yellow-600 dark:text-yellow-400';
+            case 'ooc':
+                return 'text-gray-600 dark:text-gray-400';
+            default:
+                return 'text-gray-900 dark:text-white';
+        }
+    };
+
+    return (
+        <div className={`flex ${isCurrentUser ? 'justify-end' : 'justify-start'} mb-3`}>
+            <div className={`max-w-[70%] ${isCurrentUser ? 'order-2' : 'order-1'}`}>
+                <div className="flex items-center space-x-2 mb-1">
+                    {getMessageIcon()}
+                    <span className="text-sm font-medium text-gray-900 dark:text-white">
+                        {message.author || 'Системное сообщение'}
+                    </span>
+                    <span className="text-xs text-gray-500 dark:text-gray-400">
+                        {messageTime}
+                    </span>
+                </div>
+                <div className={`
+                    px-3 py-2 rounded-lg
+                    ${isCurrentUser
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white'
+                }
+                `}>
+                    <p className={`text-sm ${getMessageColor()}`}>
+                        {message.content}
+                    </p>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+// Генерация случайной стартовой локации с помощью ИИ
+const generateRandomStartLocation = (campaign) => {
+    const locations = [
+        {
+            name: "Таверна 'Пьяный дракон'",
+            description: "Уютная таверна в небольшом городке, где собираются путешественники и местные жители. Камин весело потрескивает, а бард играет на лютне в углу.",
+            weather: "Туман",
+            time_of_day: "Вечер",
+            ambiance: "Тепло и уютно"
+        },
+        {
+            name: "Перекресток дорог",
+            description: "Древний каменный перекресток, где сходятся четыре дороги. Старый указатель показывает направления к разным городам, но некоторые названия стерлись от времени.",
+            weather: "Переменная облачность",
+            time_of_day: "Утро",
+            ambiance: "Таинственно"
+        },
+        {
+            name: "Лагерь у реки",
+            description: "Небольшая поляна у быстрой горной реки. Идеальное место для привала - есть пресная вода, а рядом растет хворост для костра.",
+            weather: "Ясно",
+            time_of_day: "День",
+            ambiance: "Спокойно"
+        },
+        {
+            name: "Руины старого храма",
+            description: "Полуразрушенный храм забытого божества. Колонны покрыты плющом, а в воздухе витает запах ладана и тайны.",
+            weather: "Дождь",
+            time_of_day: "Ночь",
+            ambiance: "Мистически"
+        },
+        {
+            name: "Торговый караван",
+            description: "Большой торговый караван остановился на ночлег. Телеги полны товаров, а купцы обсуждают дела у костра.",
+            weather: "Ветрено",
+            time_of_day: "Вечер",
+            ambiance: "Оживленно"
+        }
+    ];
+
+    const randomLocation = locations[Math.floor(Math.random() * locations.length)];
+
+    return {
+        location: randomLocation.name,
+        description: randomLocation.description,
+        weather: randomLocation.weather,
+        time_of_day: randomLocation.time_of_day,
+        ambiance: randomLocation.ambiance,
+        generated: true
+    };
 };
 
 const GamePage = () => {
@@ -72,479 +305,305 @@ const GamePage = () => {
         disconnectFromGame,
         sendAction,
         sendMessage,
-        setCurrentGame,
-        loadGame
+        loadGame,
+        rollDice,
+        clearGame
     } = useGameStore();
 
     // Локальное состояние интерфейса
     const [actionInput, setActionInput] = useState('');
     const [chatInput, setChatInput] = useState('');
     const [showDetails, setShowDetails] = useState(false);
-    const [playersCollapsed, setPlayersCollapsed] = useState(true);
+    const [playersCollapsed, setPlayersCollapsed] = useState(false);
     const [soundEnabled, setSoundEnabled] = useState(true);
     const [selectedDice, setSelectedDice] = useState('d20');
     const [diceModifier, setDiceModifier] = useState(0);
     const [isLoadingGame, setIsLoadingGame] = useState(false);
     const [loadError, setLoadError] = useState(null);
+    const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+    const [activeTab, setActiveTab] = useState('scene'); // scene, chat, players
+    const [generatedScene, setGeneratedScene] = useState(null);
 
-    // Локальные состояния для fallback если gameStore не работает
+    // Refs для автоскролла
+    const messagesEndRef = useRef(null);
+    const chatEndRef = useRef(null);
+
+    // Локальные состояния для fallback
     const [localMessages, setLocalMessages] = useState([]);
     const [localPlayers, setLocalPlayers] = useState([]);
-    const [currentSceneLocal, setCurrentSceneLocal] = useState(null);
+    const [connectionAttempts, setConnectionAttempts] = useState(0);
+    const [maxConnectionAttempts] = useState(3);
+    const [hasTriedConnecting, setHasTriedConnecting] = useState(false);
 
     // Используем локальные состояния как fallback
-    const actualMessages = messages && messages.length > 0 ? messages : localMessages;
-    const actualPlayers = players && players.length > 0 ? players : localPlayers;
-    const actualCurrentScene = currentScene || currentSceneLocal;
+    const actualMessages = messages?.length > 0 ? messages : localMessages;
+    const actualPlayers = players?.length > 0 ? players : (playersOnline?.length > 0 ? playersOnline : localPlayers);
+    const actualCurrentScene = currentScene || generatedScene;
 
-    // Загрузка игры при монтировании
+    // Автоскролл к последнему сообщению
+    const scrollToBottom = useCallback(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+        chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, []);
+
     useEffect(() => {
+        scrollToBottom();
+    }, [actualMessages, scrollToBottom]);
+
+    // Эффект загрузки игры (только один раз при монтировании)
+    useEffect(() => {
+        if (!gameId || !user) return;
+
+        let isCleanedUp = false;
+        let hasLoadedGame = false;
+        let hasConnectedWS = false;
+
         const initializeGame = async () => {
-            if (!gameId || !user) return;
+            if (isCleanedUp) return;
 
             setIsLoadingGame(true);
             setLoadError(null);
 
             try {
-                console.log('Initializing game:', gameId);
-
-                const gameData = {
-                    id: gameId,
-                    name: 'Игровая сессия',
-                    status: 'active'
-                };
-
-                if (setCurrentGame) {
-                    setCurrentGame(gameData);
+                // Загружаем игру только если она еще не загружена в этом эффекте
+                if (!hasLoadedGame && (!currentGame || currentGame.id !== gameId)) {
+                    console.log('Loading game:', gameId);
+                    await loadGame(gameId);
+                    hasLoadedGame = true;
                 }
 
-                setIsLoadingGame(false);
+                // Подключаемся к WebSocket только если:
+                // 1. Еще не подключались в этом эффекте
+                // 2. Не превышен лимит попыток подключения
+                if (!hasConnectedWS && !isConnected && !isConnecting && !isCleanedUp &&
+                    connectionAttempts < maxConnectionAttempts) {
+                    console.log('Connecting to WebSocket for game:', gameId);
+                    setHasTriedConnecting(true);
+                    setConnectionAttempts(prev => prev + 1);
+                    hasConnectedWS = true;
+
+                    try {
+                        await connectToGame(gameId);
+                    } catch (wsError) {
+                        console.warn('WebSocket connection failed:', wsError);
+                        if (connectionAttempts >= maxConnectionAttempts - 1) {
+                            setLoadError('Не удалось подключиться к серверу. Пожалуйста, проверьте подключение и попробуйте позже.');
+                        }
+                    }
+                }
 
             } catch (error) {
-                console.error('Failed to initialize game:', error);
-                setLoadError(error.message || 'Не удалось инициализировать игру');
-                setIsLoadingGame(false);
+                if (!isCleanedUp) {
+                    console.error('Ошибка загрузки игры:', error);
+                    setLoadError(error.message || 'Не удалось загрузить игру');
+                }
+            } finally {
+                if (!isCleanedUp) {
+                    setIsLoadingGame(false);
+                }
             }
         };
 
         initializeGame();
-    }, [gameId, user, setCurrentGame]);
 
-    // Автоматическое подключение к WebSocket
+        // Cleanup function - НЕ отключаем WebSocket здесь!
+        return () => {
+            isCleanedUp = true;
+            // Не вызываем disconnectFromGame здесь, так как это приводит к немедленному отключению
+        };
+    }, [gameId, user?.id]); // Только основные зависимости
+
+    // Отдельный эффект для инициализации данных после загрузки
     useEffect(() => {
-        if (gameId && user && !loadError) {
-            console.log('Setting up WebSocket connection for game:', gameId);
+        if (!currentGame || generatedScene) return;
 
-            // Настраиваем обработчики WebSocket событий
-            websocketService.on('connected', (data) => {
-                console.log('WebSocket connected:', data);
-                setLoadError(null);
-
-                if (data.game_id) {
-                    const gameData = {
-                        id: data.game_id,
-                        name: data.game_name || 'Игровая сессия',
-                        status: 'active'
-                    };
-
-                    if (setCurrentGame) {
-                        setCurrentGame(gameData);
-                    }
-                }
-
-                if (data.players_online && Array.isArray(data.players_online)) {
-                    setLocalPlayers(data.players_online);
-                }
-
-                setTimeout(() => {
-                    websocketService.requestGameState();
-                }, 1000);
-            });
-
-            websocketService.on('message_history', (data) => {
-                console.log('Received message history:', data);
-                if (data.messages && Array.isArray(data.messages)) {
-                    const formattedMessages = data.messages.map((msg, index) => ({
-                        id: msg.id || `history-${index}`,
-                        type: msg.type || 'chat',
-                        content: msg.content,
-                        sender: msg.sender_name || msg.sender || 'Неизвестный',
-                        timestamp: msg.timestamp || new Date().toISOString()
-                    }));
-                    setLocalMessages(formattedMessages);
-                }
-            });
-
-            websocketService.on('scene_update', (data) => {
-                console.log('Received scene update:', data);
-                setCurrentSceneLocal({
-                    description: data.description || data.scene_description,
-                    location: data.location || 'Неизвестная локация',
-                    weather: data.weather || 'Ясно',
-                    time_of_day: data.time_of_day || 'День',
-                    atmosphere: data.atmosphere
-                });
-            });
-
-            websocketService.on('game_state_update', (data) => {
-                console.log('Received game state update:', data);
-                if (data.current_scene) {
-                    setCurrentSceneLocal({
-                        description: data.current_scene.description || data.current_scene,
-                        location: data.current_scene.location || 'Неизвестная локация',
-                        weather: data.current_scene.weather || 'Ясно',
-                        time_of_day: data.current_scene.time_of_day || 'День',
-                        atmosphere: data.current_scene.atmosphere
-                    });
-                }
-            });
-
-            websocketService.on('error', (data) => {
-                console.error('WebSocket error:', data);
-                setLoadError('Ошибка WebSocket: ' + (data.message || 'Неизвестная ошибка'));
-            });
-
-            websocketService.on('disconnected', () => {
-                console.log('WebSocket disconnected');
-                setTimeout(() => {
-                    if (!websocketService.isConnected()) {
-                        setLoadError('Соединение с сервером потеряно');
-                    }
-                }, 3000);
-            });
-
-            websocketService.on('chat_message', (data) => {
-                console.log('Received chat message:', data);
-                const newMessage = {
-                    id: Date.now().toString(),
-                    type: 'chat',
-                    content: data.content,
-                    sender: data.sender_name || data.sender_id,
-                    timestamp: data.timestamp
-                };
-                setLocalMessages(prev => [...prev, newMessage]);
-            });
-
-            websocketService.on('player_action', (data) => {
-                console.log('Received player action:', data);
-                const newMessage = {
-                    id: Date.now().toString(),
-                    type: 'action',
-                    content: data.action,
-                    sender: data.player_name || data.player_id,
-                    timestamp: data.timestamp
-                };
-                setLocalMessages(prev => [...prev, newMessage]);
-            });
-
-            websocketService.on('dice_roll', (data) => {
-                console.log('Received dice roll:', data);
-                const newMessage = {
-                    id: Date.now().toString(),
-                    type: 'dice_roll',
-                    content: `🎲 ${data.notation}: ${data.result}`,
-                    sender: data.player_name || data.player_id,
-                    timestamp: data.timestamp
-                };
-                setLocalMessages(prev => [...prev, newMessage]);
-            });
-
-            // ✅ НОВЫЙ: Обработчик запроса броска от ИИ
-            websocketService.on('roll_request', (data) => {
-                console.log('Received roll request:', data);
-                const newMessage = {
-                    id: Date.now().toString(),
-                    type: 'roll_request',
-                    content: data.message,
-                    sender: 'ИИ Мастер',
-                    timestamp: data.timestamp,
-                    roll_data: {
-                        roll_type: data.roll_type,
-                        ability_or_skill: data.ability_or_skill,
-                        dc: data.dc,
-                        advantage: data.advantage,
-                        disadvantage: data.disadvantage,
-                        original_action: data.original_action
-                    }
-                };
-                setLocalMessages(prev => [...prev, newMessage]);
-
-                // Автоматически устанавливаем нужный тип кубика и показываем панель костей
-                if (data.roll_type === 'skill_check' || data.roll_type === 'ability_check') {
-                    setSelectedDice('d20');
-                }
-            });
-
-            // ✅ НОВЫЙ: Обработчик результата проверки
-            websocketService.on('dice_check_result', (data) => {
-                console.log('Received dice check result:', data);
-                const newMessage = {
-                    id: Date.now().toString(),
-                    type: 'dice_check_result',
-                    content: data.message,
-                    sender: 'ИИ Мастер',
-                    timestamp: data.timestamp,
-                    check_data: {
-                        roll_result: data.roll_result,
-                        dc: data.dc,
-                        success: data.success,
-                        original_action: data.original_action,
-                        player_name: data.player_name
-                    }
-                };
-                setLocalMessages(prev => [...prev, newMessage]);
-            });
-
-            websocketService.on('ai_response', (data) => {
-                console.log('Received AI response:', data);
-                const newMessage = {
-                    id: Date.now().toString(),
-                    type: 'ai_dm',
-                    content: data.message,
-                    sender: 'ИИ Мастер',
-                    timestamp: data.timestamp || new Date().toISOString()
-                };
-                setLocalMessages(prev => [...prev, newMessage]);
-            });
-
-            websocketService.on('player_joined', (data) => {
-                console.log('Player joined:', data);
-                if (data.players_online && Array.isArray(data.players_online)) {
-                    setLocalPlayers(data.players_online);
-                }
-            });
-
-            websocketService.on('player_left', (data) => {
-                console.log('Player left:', data);
-                if (data.players_online && Array.isArray(data.players_online)) {
-                    setLocalPlayers(data.players_online);
-                }
-            });
-
-            if (!websocketService.isConnected() && !websocketService.isConnecting()) {
-                console.log('Starting WebSocket connection...');
-
-                websocketService.debugTokenInfo();
-                websocketService.debugConnectionInfo();
-
-                websocketService.connect(gameId).then(() => {
-                    console.log('WebSocket connection successful');
-                }).catch((error) => {
-                    console.error('Failed to connect to game:', error);
-                    setTimeout(() => {
-                        if (!websocketService.isConnected()) {
-                            setLoadError('Не удалось подключиться к игре: ' + error.message);
-                        }
-                    }, 5000);
-                });
-            }
+        // Генерируем стартовую локацию если её нет
+        if (!currentScene) {
+            const scene = generateRandomStartLocation(currentGame);
+            setGeneratedScene(scene);
         }
+    }, [currentGame, currentScene, generatedScene]);
 
-        return () => {
-            if (gameId) {
-                console.log('Cleaning up WebSocket handlers for game:', gameId);
-                websocketService.removeAllListeners();
+    // Отдельный эффект для инициализации сообщений
+    useEffect(() => {
+        if (!currentGame || actualMessages.length > 0) return;
+
+        // Добавляем приветственное сообщение только один раз
+        setLocalMessages([
+            {
+                id: 'welcome',
+                type: 'dm',
+                author: 'Мастер игры',
+                content: `Добро пожаловать в игру "${currentGame.name}"! Приключение начинается...`,
+                timestamp: new Date().toISOString()
             }
-        };
-    }, [gameId, user]);
+        ]);
+    }, [currentGame, actualMessages.length]);
 
-    // Очистка при размонтировании
+    // Отдельный эффект для инициализации игроков
+    useEffect(() => {
+        if (!user || actualPlayers.length > 0) return;
+
+        setLocalPlayers([
+            {
+                user_id: user.id,
+                character_id: 'char1',
+                username: user.username,
+                character_name: user.display_name || 'Искатель приключений',
+                is_online: true,
+                current_hp: 25,
+                max_hp: 25,
+                initiative: 15
+            }
+        ]);
+    }, [user, actualPlayers.length]);
+
+    // Отдельный эффект для очистки WebSocket при размонтировании компонента
     useEffect(() => {
         return () => {
-            websocketService.removeAllListeners();
-            if (websocketService.isConnected()) {
-                websocketService.disconnect();
+            // Отключаем WebSocket только при полном размонтировании компонента
+            console.log('Component unmounting, disconnecting WebSocket');
+            if (isConnected) {
+                disconnectFromGame();
             }
+            clearGame();
         };
-    }, []);
+    }, []); // Пустой массив зависимостей - выполнится только при размонтировании
 
-    // Обработчики событий
-    const handleActionSubmit = async () => {
-        if (!actionInput.trim() || !gameId) return;
+    // Обработчики
+    const handleActionSubmit = useCallback(async (e) => {
+        e.preventDefault();
+        if (!actionInput.trim()) return;
+
+        const action = actionInput.trim();
+        setActionInput('');
 
         try {
-            const success = websocketService.sendPlayerAction(actionInput.trim());
-            if (!success) {
-                throw new Error('WebSocket не подключен');
+            if (isConnected) {
+                await sendAction(action);
+            } else {
+                console.warn('WebSocket not connected, action not sent');
             }
-            setActionInput('');
         } catch (error) {
-            console.error('Failed to send action:', error);
-            setLoadError('Не удалось отправить действие: ' + error.message);
+            console.error('Ошибка отправки действия:', error);
         }
-    };
+    }, [actionInput, isConnected, sendAction]);
 
-    const handleChatSubmit = async () => {
+    const handleChatSubmit = useCallback(async (e) => {
+        e.preventDefault();
         if (!chatInput.trim()) return;
 
-        try {
-            const success = websocketService.sendChatMessage(chatInput.trim(), false);
-            if (!success) {
-                throw new Error('WebSocket не подключен');
-            }
-            setChatInput('');
-        } catch (error) {
-            console.error('Failed to send chat message:', error);
-        }
-    };
-
-    const handleDiceRoll = async () => {
-        if (!gameId) return;
+        const message = chatInput.trim();
+        setChatInput('');
 
         try {
-            // Формируем полную нотацию с модификаторами
-            let notation = selectedDice;
-            if (diceModifier !== 0) {
-                notation += diceModifier > 0 ? `+${diceModifier}` : `${diceModifier}`;
+            if (isConnected) {
+                await sendMessage(message);
+            } else {
+                console.warn('WebSocket not connected, message not sent');
             }
-
-            // Определяем цель броска
-            const purpose = `Бросок ${notation}`;
-
-            // Отправляем бросок через WebSocket
-            const success = websocketService.sendDiceRoll(notation, purpose);
-            if (!success) {
-                // Fallback to API if WebSocket fails
-                await gameService.rollDice(gameId, notation, purpose);
-            }
-
-            // Сбрасываем модификатор после броска
-            setDiceModifier(0);
-
         } catch (error) {
-            console.error('Failed to roll dice:', error);
-            setLoadError('Не удалось выполнить бросок костей: ' + error.message);
+            console.error('Ошибка отправки сообщения:', error);
         }
-    };
+    }, [chatInput, isConnected, sendMessage]);
 
-// ✅ НОВАЯ ФУНКЦИЯ: Быстрый бросок d20 с модификатором
-    const handleQuickD20Roll = (modifier = 0, purpose = 'Проверка d20') => {
+    const handleDiceRoll = useCallback(async () => {
+        const notation = `1${selectedDice}${diceModifier > 0 ? `+${diceModifier}` : diceModifier < 0 ? `${diceModifier}` : ''}`;
+
         try {
-            const notation = modifier !== 0 ? `1d20${modifier > 0 ? '+' : ''}${modifier}` : '1d20';
-            const success = websocketService.sendDiceRoll(notation, purpose);
-            if (!success) {
-                console.error('WebSocket не подключен для быстрого броска');
+            if (isConnected && rollDice) {
+                await rollDice(notation, `Бросок ${selectedDice}`);
+            } else {
+                console.warn('WebSocket not connected, dice roll not sent');
             }
         } catch (error) {
-            console.error('Failed to perform quick roll:', error);
+            console.error('Ошибка броска кубика:', error);
         }
-    };
+    }, [selectedDice, diceModifier, isConnected, rollDice]);
 
-// ✅ НОВАЯ ФУНКЦИЯ: Автоматический бросок проверки
-    const handleCheckRoll = (rollData) => {
-        try {
-            let notation = '1d20';
-
-            // Добавляем базовый модификатор (можно расширить для персонажей)
-            const baseModifier = getAbilityModifier(rollData.ability_or_skill);
-            if (baseModifier !== 0) {
-                notation += baseModifier > 0 ? `+${baseModifier}` : `${baseModifier}`;
-            }
-
-            const purpose = `Проверка ${rollData.ability_or_skill} (DC ${rollData.dc})`;
-
-            const success = websocketService.sendDiceRoll(notation, purpose);
-            if (!success) {
-                console.error('WebSocket не подключен для проверки');
-            }
-        } catch (error) {
-            console.error('Failed to perform check roll:', error);
+    const handleLeaveGame = useCallback(() => {
+        if (isConnected) {
+            disconnectFromGame();
         }
-    };
-
-// ✅ ВСПОМОГАТЕЛЬНАЯ ФУНКЦИЯ: Получить модификатор характеристики
-    const getAbilityModifier = (ability) => {
-        // Пока используем базовые модификаторы, позже можно получать из профиля персонажа
-        const defaultModifiers = {
-            'strength': 1,
-            'dexterity': 2,
-            'constitution': 1,
-            'intelligence': 0,
-            'wisdom': 1,
-            'charisma': 0,
-            'athletics': 3,      // Сила + профiciency
-            'perception': 3,     // Мудрость + профiciency
-            'investigation': 2,  // Интеллект + профiciency
-            'stealth': 4,        // Ловкость + proficiency
-            'persuasion': 2,     // Харизма + proficiency
-            'deception': 0,      // Харизма
-            'insight': 1,        // Мудрость
-        };
-
-        return defaultModifiers[ability?.toLowerCase()] || 0;
-    };
-
-    const handleLeaveGame = () => {
-        websocketService.removeAllListeners();
-        if (websocketService.isConnected()) {
-            websocketService.disconnect();
-        }
+        clearGame();
         navigate('/campaigns');
-    };
+    }, [isConnected, disconnectFromGame, clearGame, navigate]);
 
-    // Статус подключения
-    const wsConnected = websocketService.isConnected();
-    const wsConnecting = websocketService.isConnecting();
-
-    const connectionStatus = wsConnected ? {
-        icon: CheckCircleIcon,
+    // Статус подключения с учетом реального состояния
+    const connectionStatus = isConnected ? {
+        icon: CheckCircleSolid,
         text: 'Подключен',
-        color: 'text-green-400'
-    } : wsConnecting ? {
+        color: 'text-green-500'
+    } : isConnecting ? {
         icon: WifiIcon,
         text: 'Подключение...',
-        color: 'text-yellow-400'
+        color: 'text-yellow-500'
+    } : connectionError || connectionAttempts >= maxConnectionAttempts ? {
+        icon: ExclamationTriangleIcon,
+        text: 'Ошибка подключения',
+        color: 'text-red-500'
     } : {
         icon: ExclamationTriangleIcon,
         text: 'Отключен',
-        color: 'text-red-400'
+        color: 'text-gray-500'
     };
 
-    const getMessageStyle = (type) => {
-        switch (type) {
-            case 'ai_dm':
-                return 'bg-purple-50 dark:bg-purple-900/20 border-purple-200 dark:border-purple-700 text-purple-900 dark:text-purple-100';
-            case 'action':
-                return 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-700 text-green-900 dark:text-green-100';
-            case 'dice_roll':
-                return 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-700 text-red-900 dark:text-red-100';
-            case 'roll_request':
-                return 'bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 dark:border-yellow-700 text-yellow-900 dark:text-yellow-100';
-            case 'dice_check_result':
-                return 'bg-indigo-50 dark:bg-indigo-900/20 border-indigo-200 dark:border-indigo-700 text-indigo-900 dark:text-indigo-100';
-            case 'chat':
-                return 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-700 text-blue-900 dark:text-blue-100';
-            default:
-                return 'bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-700';
+    // Функция для повторной попытки подключения
+    const handleRetryConnection = useCallback(async () => {
+        if (connectionAttempts < maxConnectionAttempts) {
+            setConnectionAttempts(prev => prev + 1);
+            setLoadError(null);
+            try {
+                await connectToGame(gameId);
+                console.log('Retry connection successful');
+            } catch (error) {
+                console.error('Retry connection failed:', error);
+                if (connectionAttempts >= maxConnectionAttempts - 1) {
+                    setLoadError('Не удалось подключиться к серверу после нескольких попыток.');
+                }
+            }
         }
-    };
+    }, [connectionAttempts, maxConnectionAttempts, gameId, connectToGame]);
 
-    const quickActions = ['Восприятие', 'Исследование', 'Прислушаться'];
-
-    // Показываем состояние загрузки
+    // Показываем загрузку
     if (isLoadingGame) {
         return (
             <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
                 <div className="text-center">
-                    <div className="animate-spin rounded-full h-12 w-12 border-4 border-blue-500 border-t-transparent mx-auto mb-4"></div>
-                    <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">Загрузка игры...</h3>
-                    <p className="text-gray-600 dark:text-gray-400 text-sm">Подключение к серверу</p>
+                    <div className="animate-spin rounded-full h-16 w-16 border-4 border-blue-500 border-t-transparent mx-auto mb-4"></div>
+                    <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">Загрузка игры...</h3>
+                    <p className="text-gray-600 dark:text-gray-400">Подключение к серверу и загрузка данных</p>
                 </div>
             </div>
         );
     }
 
-    // Показываем ошибку загрузки
+    // Показываем ошибку
     if (loadError) {
         return (
             <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
-                <div className="text-center">
-                    <ExclamationTriangleIcon className="h-12 w-12 text-red-500 mx-auto mb-4" />
-                    <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">Ошибка загрузки</h3>
-                    <p className="text-gray-600 dark:text-gray-400 text-sm mb-4">{loadError}</p>
-                    <Button onClick={() => window.location.reload()}>
-                        Попробовать снова
-                    </Button>
+                <div className="text-center max-w-md">
+                    <ExclamationTriangleIcon className="h-16 w-16 text-red-500 mx-auto mb-4" />
+                    <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">Ошибка загрузки</h3>
+                    <p className="text-gray-600 dark:text-gray-400 mb-6">{loadError}</p>
+                    <div className="space-x-4">
+                        {connectionAttempts < maxConnectionAttempts && (
+                            <Button onClick={handleRetryConnection} variant="default">
+                                Попробовать подключиться снова
+                            </Button>
+                        )}
+                        <Button onClick={() => window.location.reload()} variant="outline">
+                            Перезагрузить страницу
+                        </Button>
+                        <Button onClick={() => navigate('/campaigns')} variant="outline">
+                            Вернуться к кампаниям
+                        </Button>
+                    </div>
+                    {connectionAttempts >= maxConnectionAttempts && (
+                        <p className="text-sm text-gray-500 dark:text-gray-400 mt-4">
+                            Превышен лимит попыток подключения. Пожалуйста, проверьте работу сервера.
+                        </p>
+                    )}
                 </div>
             </div>
         );
@@ -552,645 +611,584 @@ const GamePage = () => {
 
     return (
         <div className="min-h-screen bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-white">
-            <div className="flex flex-col h-screen">
-                {/* Header */}
-                <header className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-4 py-3 flex-shrink-0 shadow-sm">
-                    <div className="flex items-center justify-between">
-                        <div className="flex items-center space-x-4 min-w-0 flex-1">
-                            <Button
-                                onClick={handleLeaveGame}
-                                variant="ghost"
-                                size="sm"
-                                className="text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-white flex-shrink-0"
-                            >
-                                <ArrowLeftIcon className="w-5 h-5" />
-                            </Button>
-                            <div className="min-w-0 flex-1">
-                                <h1 className="text-lg font-semibold truncate">
-                                    {currentGame?.name || 'Игровая сессия'}
-                                </h1>
-                                <p className="text-sm text-gray-500 dark:text-gray-400 truncate">
-                                    D&D 5e • {(playersOnline || actualPlayers || []).length} игроков онлайн
+            {/* Mobile Header */}
+            <div className="lg:hidden bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
+                <div className="flex items-center justify-between px-4 py-3">
+                    <Button
+                        onClick={handleLeaveGame}
+                        variant="ghost"
+                        size="sm"
+                        className="text-red-600 hover:text-red-700"
+                    >
+                        <ArrowLeftIcon className="w-5 h-5 mr-2" />
+                        Выход
+                    </Button>
+
+                    <div className="flex items-center space-x-2">
+                        <connectionStatus.icon className={`w-5 h-5 ${connectionStatus.color}`} />
+                        <span className={`text-sm ${connectionStatus.color}`}>
+                            {connectionStatus.text}
+                        </span>
+                    </div>
+
+                    <Button
+                        onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+                        variant="ghost"
+                        size="sm"
+                    >
+                        <EllipsisVerticalIcon className="w-5 h-5" />
+                    </Button>
+                </div>
+
+                {/* Mobile Tab Navigation */}
+                <div className="flex border-t border-gray-200 dark:border-gray-700">
+                    <button
+                        onClick={() => setActiveTab('scene')}
+                        className={`flex-1 py-3 text-sm font-medium ${
+                            activeTab === 'scene'
+                                ? 'text-blue-600 dark:text-blue-400 border-b-2 border-blue-600'
+                                : 'text-gray-500 dark:text-gray-400'
+                        }`}
+                    >
+                        <EyeIcon className="w-4 h-4 mx-auto mb-1" />
+                        Сцена
+                    </button>
+                    <button
+                        onClick={() => setActiveTab('chat')}
+                        className={`flex-1 py-3 text-sm font-medium ${
+                            activeTab === 'chat'
+                                ? 'text-blue-600 dark:text-blue-400 border-b-2 border-blue-600'
+                                : 'text-gray-500 dark:text-gray-400'
+                        }`}
+                    >
+                        <ChatBubbleLeftIcon className="w-4 h-4 mx-auto mb-1" />
+                        Чат
+                    </button>
+                    <button
+                        onClick={() => setActiveTab('players')}
+                        className={`flex-1 py-3 text-sm font-medium ${
+                            activeTab === 'players'
+                                ? 'text-blue-600 dark:text-blue-400 border-b-2 border-blue-600'
+                                : 'text-gray-500 dark:text-gray-400'
+                        }`}
+                    >
+                        <UsersIcon className="w-4 h-4 mx-auto mb-1" />
+                        Игроки
+                    </button>
+                </div>
+            </div>
+
+            {/* Desktop Header */}
+            <header className="hidden lg:block bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 py-4">
+                <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-4">
+                        <Button
+                            onClick={handleLeaveGame}
+                            variant="ghost"
+                            size="sm"
+                            className="text-red-600 hover:text-red-700"
+                        >
+                            <ArrowLeftIcon className="w-5 h-5 mr-2" />
+                            Покинуть игру
+                        </Button>
+
+                        <div className="h-6 w-px bg-gray-300 dark:bg-gray-600"></div>
+
+                        <div className="flex items-center space-x-3">
+                            <h1 className="text-xl font-bold text-gray-900 dark:text-white">
+                                {currentGame?.name || 'Игровая сессия'}
+                            </h1>
+                            {currentGame?.description && (
+                                <p className="text-gray-600 dark:text-gray-400 text-sm">
+                                    {currentGame.description}
                                 </p>
-                            </div>
-                        </div>
-
-                        <div className="flex items-center space-x-3 flex-shrink-0">
-                            <div className="flex items-center space-x-2">
-                                <connectionStatus.icon className={`w-4 h-4 ${connectionStatus.color}`} />
-                                <span className={`text-sm ${connectionStatus.color}`}>
-                                    {connectionStatus.text}
-                                </span>
-                            </div>
-
-                            <button
-                                onClick={() => setSoundEnabled(!soundEnabled)}
-                                className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700"
-                            >
-                                {soundEnabled ? <SpeakerWaveIcon className="w-4 h-4" /> : <SpeakerXMarkIcon className="w-4 h-4" />}
-                            </button>
-                            <Button variant="ghost" size="sm">
-                                <Cog6ToothIcon className="w-4 h-4" />
-                            </Button>
-                            <Button
-                                onClick={handleLeaveGame}
-                                variant="outline"
-                                size="sm"
-                                className="text-red-600 border-red-300 hover:bg-red-50"
-                            >
-                                Покинуть игру
-                            </Button>
+                            )}
                         </div>
                     </div>
-                </header>
 
-                {/* Game content */}
-                <div className="flex-1 flex min-h-0">
-                    {/* Main content area */}
-                    <div className="flex-1 flex flex-col min-w-0">
-                        {/* Scene panel */}
-                        <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 p-4">
-                            <div className="flex items-center justify-between mb-2">
-                                <h3 className="font-semibold text-lg flex items-center">
-                                    <EyeIcon className="w-5 h-5 mr-2" />
+                    <div className="flex items-center space-x-4">
+                        <div className="flex items-center space-x-2">
+                            <connectionStatus.icon className={`w-5 h-5 ${connectionStatus.color}`} />
+                            <span className={`text-sm font-medium ${connectionStatus.color}`}>
+                                {connectionStatus.text}
+                            </span>
+                        </div>
+
+                        <Button
+                            onClick={() => setSoundEnabled(!soundEnabled)}
+                            variant="ghost"
+                            size="sm"
+                            title={soundEnabled ? 'Отключить звук' : 'Включить звук'}
+                        >
+                            {soundEnabled ? <SpeakerWaveIcon className="w-5 h-5" /> : <SpeakerXMarkIcon className="w-5 h-5" />}
+                        </Button>
+
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            title="Настройки игры"
+                        >
+                            <Cog6ToothIcon className="w-5 h-5" />
+                        </Button>
+                    </div>
+                </div>
+            </header>
+
+            {/* Main Content */}
+            <div className="flex h-screen lg:pt-0 pt-0">
+                {/* Desktop Layout */}
+                <div className="hidden lg:flex flex-1">
+                    {/* Left Panel - Scene */}
+                    <div className="flex-1 flex flex-col min-w-0 bg-white dark:bg-gray-800">
+                        {/* Scene Header */}
+                        <div className="border-b border-gray-200 dark:border-gray-700 p-4">
+                            <div className="flex items-center justify-between mb-3">
+                                <h2 className="text-lg font-semibold flex items-center">
+                                    <EyeIcon className="w-6 h-6 mr-2 text-blue-600" />
                                     Текущая сцена
-                                </h3>
+                                </h2>
                                 <Button
                                     onClick={() => setShowDetails(!showDetails)}
                                     variant="ghost"
                                     size="sm"
                                     className="text-blue-600 dark:text-blue-400"
                                 >
-                                    {showDetails ? 'Скрыть детали' : 'Показать детали'}
+                                    {showDetails ? 'Скрыть' : 'Детали'}
                                     {showDetails ? <ChevronUpIcon className="w-4 h-4 ml-1" /> : <ChevronDownIcon className="w-4 h-4 ml-1" />}
                                 </Button>
                             </div>
 
-                            <div className={`transition-all duration-300 ${showDetails ? 'max-h-96 overflow-y-auto' : 'max-h-20 overflow-hidden'}`}>
-                                <div className="space-y-2">
-                                    <div className="text-sm font-medium text-gray-600 dark:text-gray-300">
-                                        📍 {actualCurrentScene?.location || 'Неизвестная локация'} •
-                                        🌤️ {actualCurrentScene?.weather || 'Ясно'} •
-                                        🕒 {actualCurrentScene?.time_of_day || 'День'}
+                            {/* Scene Info */}
+                            <div className="space-y-2">
+                                <div className="flex flex-wrap items-center gap-4 text-sm">
+                                    <div className="flex items-center space-x-1">
+                                        <MapIcon className="w-4 h-4 text-gray-500" />
+                                        <span className="font-medium text-gray-900 dark:text-white">
+                                            {actualCurrentScene?.location || 'Неизвестная локация'}
+                                        </span>
                                     </div>
-                                    <div className="text-sm leading-relaxed text-gray-700 dark:text-gray-300">
-                                        {actualCurrentScene?.description || 'Описание сцены недоступно. Мастер готовит новое приключение...'}
+                                    <div className="flex items-center space-x-1">
+                                        <CloudSolid className="w-4 h-4 text-gray-500" />
+                                        <span className="text-gray-600 dark:text-gray-400">
+                                            {actualCurrentScene?.weather || 'Ясно'}
+                                        </span>
                                     </div>
-                                    {actualCurrentScene?.atmosphere && (
-                                        <div className="text-xs text-gray-500 dark:text-gray-400 italic">
-                                            {actualCurrentScene.atmosphere}
-                                        </div>
+                                    <div className="flex items-center space-x-1">
+                                        {actualCurrentScene?.time_of_day === 'День' ? (
+                                            <SunSolid className="w-4 h-4 text-yellow-500" />
+                                        ) : actualCurrentScene?.time_of_day === 'Ночь' ? (
+                                            <MoonSolid className="w-4 h-4 text-blue-500" />
+                                        ) : (
+                                            <CloudSolid className="w-4 h-4 text-gray-500" />
+                                        )}
+                                        <span className="text-gray-600 dark:text-gray-400">
+                                            {actualCurrentScene?.time_of_day || 'День'}
+                                        </span>
+                                    </div>
+                                </div>
+
+                                <AnimatePresence>
+                                    {showDetails && (
+                                        <motion.div
+                                            initial={{ opacity: 0, height: 0 }}
+                                            animate={{ opacity: 1, height: 'auto' }}
+                                            exit={{ opacity: 0, height: 0 }}
+                                            transition={{ duration: 0.2 }}
+                                        >
+                                            <div className="mt-3 p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                                                <p className="text-sm text-gray-700 dark:text-gray-300 leading-relaxed">
+                                                    {actualCurrentScene?.description || 'Описание сцены загружается...'}
+                                                </p>
+                                                {actualCurrentScene?.ambiance && (
+                                                    <p className="mt-2 text-xs text-gray-500 dark:text-gray-400 italic">
+                                                        Атмосфера: {actualCurrentScene.ambiance}
+                                                    </p>
+                                                )}
+                                            </div>
+                                        </motion.div>
                                     )}
-                                </div>
+                                </AnimatePresence>
                             </div>
                         </div>
 
-                        {/* Messages area */}
-                        <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-gray-50 dark:bg-gray-900">
-                            {(() => {
-                                const gameMessages = actualMessages?.filter(msg =>
-                                    msg.type !== 'chat' &&
-                                    msg.message_type !== 'chat' &&
-                                    ['action', 'dice_roll', 'ai_dm', 'system', 'roll_request', 'dice_check_result'].includes(msg.type || msg.message_type)
-                                ) || [];
-
-                                if (gameMessages.length === 0) {
-                                    return (
-                                        <div className="flex items-center justify-center h-full">
-                                            <div className="text-center">
-                                                <div className="animate-spin rounded-full h-8 w-8 border-4 border-purple-500 border-t-transparent mx-auto mb-4"></div>
-                                                <h3 className="text-lg font-semibold text-gray-600 dark:text-gray-400 mb-2">🤖 ИИ Мастер готовит приключение</h3>
-                                                <p className="text-gray-500 dark:text-gray-500 text-sm">Опишите действие вашего персонажа, чтобы начать игру!</p>
-                                            </div>
-                                        </div>
-                                    );
-                                }
-
-                                return gameMessages.map((message) => (
-                                    <div
-                                        key={message.id}
-                                        className={`p-3 rounded-lg border ${getMessageStyle(message.type)} shadow-sm`}
-                                    >
-                                        <div className="flex items-center justify-between mb-1">
-            <span className="font-semibold text-sm flex items-center">
-                {message.type === 'action' && <span className="mr-2">⚔️</span>}
-                {message.type === 'dice_roll' && <span className="mr-2">🎲</span>}
-                {message.type === 'ai_dm' && <span className="mr-2">🤖</span>}
-                {message.type === 'system' && <span className="mr-2">⚡</span>}
-                {message.type === 'roll_request' && <span className="mr-2">🎯</span>}
-                {message.type === 'dice_check_result' && (
-                    <span className="mr-2">
-                        {message.check_data?.success ? '✅' : '❌'}
-                    </span>
-                )}
-                {message.sender || message.sender_name || 'Неизвестный'}
-            </span>
-                                            <span className="text-xs opacity-60">
-                {new Date(message.timestamp).toLocaleTimeString()}
-            </span>
-                                        </div>
-
-                                        {/* Основной контент сообщения */}
-                                        <div className="text-sm leading-relaxed mb-2">
-                                            {message.content}
-                                        </div>
-
-                                        {/* Дополнительная информация для разных типов сообщений */}
-                                        {message.type === 'roll_request' && message.roll_data && (
-                                            <div className="mt-2 p-2 bg-yellow-100 dark:bg-yellow-900/30 rounded border">
-                                                <div className="text-xs space-y-1">
-                                                    <div><strong>Тип:</strong> {message.roll_data.roll_type}</div>
-                                                    <div><strong>Навык:</strong> {message.roll_data.ability_or_skill}</div>
-                                                    <div><strong>Сложность:</strong> {message.roll_data.dc}</div>
-                                                    {message.roll_data.advantage && <div className="text-green-600">✅ Преимущество</div>}
-                                                    {message.roll_data.disadvantage && <div className="text-red-600">⚠️ Помеха</div>}
-                                                </div>
-                                                <button
-                                                    onClick={() => {
-                                                        setSelectedDice('d20');
-                                                        // Можно добавить автоматический бросок если нужно
-                                                    }}
-                                                    className="mt-2 px-3 py-1 bg-yellow-500 text-white rounded text-xs hover:bg-yellow-600 transition-colors"
-                                                >
-                                                    🎲 Бросить d20
-                                                </button>
-                                            </div>
-                                        )}
-
-                                        {message.type === 'dice_check_result' && message.check_data && (
-                                            <div className={`mt-2 p-2 rounded border ${
-                                                message.check_data.success
-                                                    ? 'bg-green-100 dark:bg-green-900/30 border-green-200 dark:border-green-700'
-                                                    : 'bg-red-100 dark:bg-red-900/30 border-red-200 dark:border-red-700'
-                                            }`}>
-                                                <div className="text-xs space-y-1">
-                                                    <div><strong>Результат броска:</strong> {message.check_data.roll_result}</div>
-                                                    <div><strong>Нужно было:</strong> {message.check_data.dc}</div>
-                                                    <div className={`font-bold ${message.check_data.success ? 'text-green-600' : 'text-red-600'}`}>
-                                                        {message.check_data.success ? '✅ УСПЕХ' : '❌ НЕУДАЧА'}
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        )}
-
-                                        {/* Метка типа сообщения */}
-                                        <div className="mt-2 flex items-center justify-between">
-            <span className="text-xs opacity-50 capitalize">
-                {message.type === 'action' && 'Действие игрока'}
-                {message.type === 'dice_roll' && 'Бросок костей'}
-                {message.type === 'ai_dm' && 'Ответ мастера'}
-                {message.type === 'system' && 'Системное сообщение'}
-                {message.type === 'roll_request' && 'Запрос проверки'}
-                {message.type === 'dice_check_result' && 'Результат проверки'}
-            </span>
-                                        </div>
-                                    </div>
-                                ));
-                            })()}
+                        {/* Messages Area */}
+                        <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50 dark:bg-gray-900">
+                            {actualMessages.map((message, index) => (
+                                <ChatMessage
+                                    key={message.id || index}
+                                    message={message}
+                                    isCurrentUser={message.author === user?.username}
+                                />
+                            ))}
+                            <div ref={messagesEndRef} />
                         </div>
 
-                        {/* Quick Actions */}
-                        <div className="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 p-3">
-                            <div className="flex items-center space-x-2">
-                                <span className="text-sm font-medium text-gray-600 dark:text-gray-300">Быстрые действия:</span>
-                                {quickActions.map((action, index) => (
-                                    <button
-                                        key={index}
-                                        onClick={() => setActionInput(action)}
-                                        className="px-2 py-1 text-sm bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200 border border-blue-200 dark:border-blue-700 rounded-md hover:bg-blue-200 dark:hover:bg-blue-900/50 transition-colors flex items-center"
-                                    >
-                                        {action === 'Восприятие' && <EyeIcon className="w-3 h-3 mr-1" />}
-                                        {action === 'Исследование' && <MagnifyingGlassIcon className="w-3 h-3 mr-1" />}
-                                        {action === 'Прислушаться' && <SpeakerWaveIcon className="w-3 h-3 mr-1" />}
-                                        {action}
-                                    </button>
-                                ))}
-                            </div>
-                        </div>
-
-                        {/* Player Actions Input */}
-                        <div className="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 p-4">
-                            <div className="space-y-3">
-                                <div className="flex items-center justify-between">
-                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 flex items-center">
-                                        <PaperAirplaneIcon className="w-4 h-4 mr-1" />
-                                        Действия персонажа
-                                    </label>
-                                    <div className="text-xs text-gray-500 dark:text-gray-400 flex items-center">
-                                        <span className="w-2 h-2 bg-green-500 rounded-full mr-1"></span>
-                                        Игровые действия (не чат)
-                                    </div>
+                        {/* Action Input */}
+                        <div className="border-t border-gray-200 dark:border-gray-700 p-4 bg-white dark:bg-gray-800">
+                            <form onSubmit={handleActionSubmit} className="space-y-3">
+                                <div className="flex items-center space-x-2">
+                                    <CommandLineIcon className="w-5 h-5 text-purple-600" />
+                                    <span className="font-medium text-gray-900 dark:text-white">Игровое действие</span>
                                 </div>
-
                                 <div className="flex space-x-2">
-                                    <div className="flex-1 relative">
-                                        <textarea
-                                            value={actionInput}
-                                            onChange={(e) => setActionInput(e.target.value)}
-                                            onKeyDown={(e) => {
-                                                if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-                                                    handleActionSubmit();
-                                                }
-                                            }}
-                                            placeholder={!wsConnected ?
-                                                "Отключено от сервера..." :
-                                                "Опишите что делает ваш персонаж: 'Исследую комнату', 'Атакую орка мечом', 'Пытаюсь открыть дверь'... (Ctrl+Enter для отправки)"
-                                            }
-                                            disabled={!wsConnected}
-                                            className="w-full px-3 py-2 min-h-[100px] bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 resize-none disabled:opacity-50"
-                                            rows={4}
-                                        />
-                                        <div className="absolute bottom-2 right-2 text-xs text-gray-400">
-                                            {actionInput.length}/500
-                                        </div>
-                                    </div>
+                                    <input
+                                        type="text"
+                                        value={actionInput}
+                                        onChange={(e) => setActionInput(e.target.value)}
+                                        placeholder="Что делает ваш персонаж?"
+                                        disabled={!isConnected}
+                                        className="flex-1 px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:opacity-50"
+                                    />
                                     <Button
-                                        onClick={handleActionSubmit}
-                                        disabled={!actionInput.trim() || !wsConnected}
-                                        className="px-4 py-2 h-fit bg-green-600 hover:bg-green-700 focus:ring-green-500"
-                                        title="Отправить игровое действие"
+                                        type="submit"
+                                        disabled={!actionInput.trim() || !isConnected}
+                                        variant="magic"
+                                        size="default"
                                     >
-                                        <PaperAirplaneIcon className="w-5 h-5" />
+                                        <PaperAirplaneIcon className="w-4 h-4 mr-2" />
+                                        Действие
                                     </Button>
                                 </div>
-
-                                <div className="flex items-center justify-between text-xs">
-                                    {!wsConnected ? (
-                                        <p className="text-red-500">Подключение к серверу потеряно</p>
-                                    ) : (
-                                        <p className="text-gray-500 dark:text-gray-400">
-                                            ⚔️ Опишите действия персонажа. ИИ мастер ответит на ваши действия.
-                                        </p>
-                                    )}
-                                    <p className="text-gray-400">
-                                        💬 Для общения с игроками используйте чат справа
+                                {!isConnected && (
+                                    <p className="text-xs text-red-500">
+                                        {connectionError || 'Нет подключения к серверу'}
                                     </p>
-                                </div>
-                            </div>
+                                )}
+                            </form>
                         </div>
+                    </div>
 
-                        {/* Dice Panel */}
-                        {/* Dice Panel - ✅ УЛУЧШЕНО с быстрыми проверками */}
-                        <div className="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 p-4">
-                            <h4 className="font-semibold mb-3 flex items-center text-gray-900 dark:text-white">
-                                <CubeIcon className="w-5 h-5 mr-2" />
-                                Броски кубиков
-                            </h4>
-
-                            {/* Основная панель бросков */}
-                            <div className="space-y-4">
-                                {/* Основной бросок кубиков */}
-                                <div className="flex items-center justify-between">
-                                    <div className="flex items-center space-x-3">
-                                        <select
-                                            value={selectedDice}
-                                            onChange={(e) => setSelectedDice(e.target.value)}
-                                            className="px-3 py-1 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                        >
-                                            {['d4', 'd6', 'd8', 'd10', 'd12', 'd20', 'd100'].map((dice) => (
-                                                <option key={dice} value={dice}>{dice}</option>
-                                            ))}
-                                        </select>
-
-                                        <div className="flex items-center space-x-1">
-                                            <button
-                                                onClick={() => setDiceModifier(Math.max(-10, diceModifier - 1))}
-                                                className="px-2 py-1 text-sm bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-200 rounded hover:bg-gray-300 dark:hover:bg-gray-500"
-                                            >
-                                                −
-                                            </button>
-                                            <span className="text-sm min-w-[2rem] text-center font-mono">
-                        {diceModifier > 0 ? '+' : ''}{diceModifier}
-                    </span>
-                                            <button
-                                                onClick={() => setDiceModifier(Math.min(10, diceModifier + 1))}
-                                                className="px-2 py-1 text-sm bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-200 rounded hover:bg-gray-300 dark:hover:bg-gray-500"
-                                            >
-                                                +
-                                            </button>
-                                        </div>
-
-                                        <Button
-                                            onClick={handleDiceRoll}
-                                            variant="secondary"
-                                            size="sm"
-                                            disabled={!wsConnected}
-                                            className="bg-red-600 hover:bg-red-700"
-                                        >
-                                            🎲 Бросить
-                                        </Button>
-                                    </div>
-
-                                    <div className="text-sm text-gray-500 dark:text-gray-400">
-                                        {wsConnected ? 'Готов к игре' : 'Отключено от сервера'}
-                                    </div>
-                                </div>
-
-                                {/* Быстрые проверки D&D */}
-                                <div className="border-t border-gray-200 dark:border-gray-600 pt-3">
-                                    <h5 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                                        ⚡ Быстрые проверки
-                                    </h5>
-
-                                    <div className="grid grid-cols-2 gap-2">
-                                        {/* Характеристики */}
-                                        <button
-                                            onClick={() => handleQuickD20Roll(getAbilityModifier('strength'), 'Проверка Силы')}
-                                            disabled={!wsConnected}
-                                            className="px-2 py-1 text-xs bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-200 border border-red-200 dark:border-red-700 rounded hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors disabled:opacity-50"
-                                        >
-                                            💪 Сила (+{getAbilityModifier('strength')})
-                                        </button>
-
-                                        <button
-                                            onClick={() => handleQuickD20Roll(getAbilityModifier('dexterity'), 'Проверка Ловкости')}
-                                            disabled={!wsConnected}
-                                            className="px-2 py-1 text-xs bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-200 border border-green-200 dark:border-green-700 rounded hover:bg-green-200 dark:hover:bg-green-900/50 transition-colors disabled:opacity-50"
-                                        >
-                                            🏃 Ловкость (+{getAbilityModifier('dexterity')})
-                                        </button>
-
-                                        <button
-                                            onClick={() => handleQuickD20Roll(getAbilityModifier('constitution'), 'Проверка Телосложения')}
-                                            disabled={!wsConnected}
-                                            className="px-2 py-1 text-xs bg-orange-100 dark:bg-orange-900/30 text-orange-800 dark:text-orange-200 border border-orange-200 dark:border-orange-700 rounded hover:bg-orange-200 dark:hover:bg-orange-900/50 transition-colors disabled:opacity-50"
-                                        >
-                                            🛡️ Телосложение (+{getAbilityModifier('constitution')})
-                                        </button>
-
-                                        <button
-                                            onClick={() => handleQuickD20Roll(getAbilityModifier('wisdom'), 'Проверка Мудрости')}
-                                            disabled={!wsConnected}
-                                            className="px-2 py-1 text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200 border border-blue-200 dark:border-blue-700 rounded hover:bg-blue-200 dark:hover:bg-blue-900/50 transition-colors disabled:opacity-50"
-                                        >
-                                            🧠 Мудрость (+{getAbilityModifier('wisdom')})
-                                        </button>
-                                    </div>
-
-                                    <div className="mt-2 grid grid-cols-2 gap-2">
-                                        {/* Навыки */}
-                                        <button
-                                            onClick={() => handleQuickD20Roll(getAbilityModifier('athletics'), 'Проверка Атлетики')}
-                                            disabled={!wsConnected}
-                                            className="px-2 py-1 text-xs bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-200 border border-purple-200 dark:border-purple-700 rounded hover:bg-purple-200 dark:hover:bg-purple-900/50 transition-colors disabled:opacity-50"
-                                        >
-                                            🏋️ Атлетика (+{getAbilityModifier('athletics')})
-                                        </button>
-
-                                        <button
-                                            onClick={() => handleQuickD20Roll(getAbilityModifier('perception'), 'Проверка Восприятия')}
-                                            disabled={!wsConnected}
-                                            className="px-2 py-1 text-xs bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-200 border border-yellow-200 dark:border-yellow-700 rounded hover:bg-yellow-200 dark:hover:bg-yellow-900/50 transition-colors disabled:opacity-50"
-                                        >
-                                            👁️ Восприятие (+{getAbilityModifier('perception')})
-                                        </button>
-
-                                        <button
-                                            onClick={() => handleQuickD20Roll(getAbilityModifier('stealth'), 'Проверка Скрытности')}
-                                            disabled={!wsConnected}
-                                            className="px-2 py-1 text-xs bg-gray-100 dark:bg-gray-900/30 text-gray-800 dark:text-gray-200 border border-gray-200 dark:border-gray-700 rounded hover:bg-gray-200 dark:hover:bg-gray-900/50 transition-colors disabled:opacity-50"
-                                        >
-                                            🥷 Скрытность (+{getAbilityModifier('stealth')})
-                                        </button>
-
-                                        <button
-                                            onClick={() => handleQuickD20Roll(getAbilityModifier('investigation'), 'Проверка Расследования')}
-                                            disabled={!wsConnected}
-                                            className="px-2 py-1 text-xs bg-indigo-100 dark:bg-indigo-900/30 text-indigo-800 dark:text-indigo-200 border border-indigo-200 dark:border-indigo-700 rounded hover:bg-indigo-200 dark:hover:bg-indigo-900/50 transition-colors disabled:opacity-50"
-                                        >
-                                            🔍 Расследование (+{getAbilityModifier('investigation')})
-                                        </button>
-                                    </div>
-                                </div>
-
-                                {/* Быстрые броски урона */}
-                                <div className="border-t border-gray-200 dark:border-gray-600 pt-3">
-                                    <h5 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                                        ⚔️ Броски урона
-                                    </h5>
-
-                                    <div className="flex space-x-2">
-                                        <button
-                                            onClick={() => websocketService.sendDiceRoll('1d6', 'Урон коротким мечом')}
-                                            disabled={!wsConnected}
-                                            className="px-2 py-1 text-xs bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-200 border border-red-200 dark:border-red-700 rounded hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors disabled:opacity-50"
-                                        >
-                                            ⚔️ 1d6
-                                        </button>
-
-                                        <button
-                                            onClick={() => websocketService.sendDiceRoll('1d8', 'Урон длинным мечом')}
-                                            disabled={!wsConnected}
-                                            className="px-2 py-1 text-xs bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-200 border border-red-200 dark:border-red-700 rounded hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors disabled:opacity-50"
-                                        >
-                                            🗡️ 1d8
-                                        </button>
-
-                                        <button
-                                            onClick={() => websocketService.sendDiceRoll('1d10', 'Урон двуручным оружием')}
-                                            disabled={!wsConnected}
-                                            className="px-2 py-1 text-xs bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-200 border border-red-200 dark:border-red-700 rounded hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors disabled:opacity-50"
-                                        >
-                                            ⚔️ 1d10
-                                        </button>
-
-                                        <button
-                                            onClick={() => websocketService.sendDiceRoll('1d12', 'Урон тяжелым оружием')}
-                                            disabled={!wsConnected}
-                                            className="px-2 py-1 text-xs bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-200 border border-red-200 dark:border-red-700 rounded hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors disabled:opacity-50"
-                                        >
-                                            🔨 1d12
-                                        </button>
-                                    </div>
-                                </div>
-
-                                {/* Информация */}
-                                <div className="text-xs text-gray-500 dark:text-gray-400 pt-2 border-t border-gray-200 dark:border-gray-600">
-                                    💡 ИИ Мастер автоматически запрашивает нужные проверки для ваших действий
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* Right sidebar - игроки и чат */}
-                        <div className="w-80 border-l border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 flex flex-col">
-                            {/* Players Panel */}
-                            <div className="border-b border-gray-200 dark:border-gray-700">
+                    {/* Right Panel - Chat & Players */}
+                    <div className="w-80 border-l border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 flex flex-col">
+                        {/* Players Section */}
+                        <div className="border-b border-gray-200 dark:border-gray-700">
+                            <div className="p-4">
                                 <button
                                     onClick={() => setPlayersCollapsed(!playersCollapsed)}
-                                    className="w-full p-3 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                                    className="flex items-center justify-between w-full text-left"
                                 >
-                                    <div className="flex items-center">
-                                        <UsersIcon className="w-5 h-5 mr-2" />
-                                        <span className="font-semibold">
-                                        Игроки ({(actualPlayers || []).filter(p => p.isOnline || p.is_online).length}/{(actualPlayers || []).length})
-                                    </span>
+                                    <div className="flex items-center space-x-2">
+                                        <UsersIcon className="w-5 h-5 text-green-600" />
+                                        <span className="font-medium text-gray-900 dark:text-white">
+                                            Игроки ({actualPlayers.length})
+                                        </span>
                                     </div>
                                     {playersCollapsed ? <ChevronDownIcon className="w-4 h-4" /> : <ChevronUpIcon className="w-4 h-4" />}
                                 </button>
 
-                                {!playersCollapsed && (
-                                    <div className="px-3 pb-3 space-y-2">
-                                        {(!actualPlayers || actualPlayers.length === 0) ? (
-                                            <div className="text-center text-gray-500 dark:text-gray-400 py-4">
-                                                <UsersIcon className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                                                <p className="text-sm">Игроки подключаются...</p>
-                                            </div>
-                                        ) : (
-                                            actualPlayers.map((player) => (
-                                                <div
-                                                    key={player.id || player.user_id}
-                                                    className={`p-2 rounded-lg border ${
-                                                        player.isCurrentTurn || player.is_current_turn ? 'bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 dark:border-yellow-700' :
-                                                            player.isOnline || player.is_online ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-700' :
-                                                                'bg-gray-50 dark:bg-gray-700 border-gray-200 dark:border-gray-600'
-                                                    }`}
-                                                >
-                                                    <div className="flex items-center justify-between">
-                                                        <div className="flex items-center space-x-2">
-                                                            <div className={`w-2 h-2 rounded-full ${
-                                                                player.isOnline || player.is_online ? 'bg-green-500' : 'bg-gray-400'
-                                                            }`} />
-                                                            <span className="font-medium text-sm">
-                                                            {player.name || player.username || player.character_name}
-                                                        </span>
-                                                            {(player.isCurrentTurn || player.is_current_turn) && (
-                                                                <span className="px-1 py-0.5 text-xs bg-yellow-200 dark:bg-yellow-800 text-yellow-800 dark:text-yellow-200 rounded">
-                                                                Ход
-                                                            </span>
-                                                            )}
-                                                        </div>
-                                                        <div className="text-xs text-gray-500 dark:text-gray-400">
-                                                            {player.initiative || '—'}
-                                                        </div>
-                                                    </div>
-                                                    <div className="text-xs text-gray-600 dark:text-gray-400 mt-1">
-                                                        {player.character || player.character_name || 'Персонаж не выбран'}
-                                                    </div>
-                                                    {(player.hp || (player.current_hp !== undefined && player.max_hp !== undefined)) && (
-                                                        <div className="flex items-center justify-between mt-2">
-                                                            <div className="text-xs text-gray-600 dark:text-gray-400">
-                                                                HP: {player.hp ? `${player.hp.current}/${player.hp.max}` : `${player.current_hp}/${player.max_hp}`}
-                                                            </div>
-                                                            <div className="flex-1 mx-2">
-                                                                <div className="h-1 bg-gray-200 dark:bg-gray-600 rounded-full overflow-hidden">
-                                                                    <div
-                                                                        className="h-full bg-green-500 transition-all duration-300"
-                                                                        style={{
-                                                                            width: `${player.hp ?
-                                                                                (player.hp.current / player.hp.max) * 100 :
-                                                                                (player.current_hp / player.max_hp) * 100
-                                                                            }%`
-                                                                        }}
-                                                                    />
-                                                                </div>
-                                                            </div>
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            ))
-                                        )}
-                                        <div className="flex gap-2 mt-3">
-                                            <Button variant="outline" size="sm" className="flex-1 text-xs">
-                                                Сменить персонажа
-                                            </Button>
-                                            <Button variant="ghost" size="sm" className="flex-1 text-xs">
-                                                Пригласить игроков
-                                            </Button>
-                                        </div>
-                                    </div>
+                                <AnimatePresence>
+                                    {!playersCollapsed && (
+                                        <motion.div
+                                            initial={{ opacity: 0, height: 0 }}
+                                            animate={{ opacity: 1, height: 'auto' }}
+                                            exit={{ opacity: 0, height: 0 }}
+                                            transition={{ duration: 0.2 }}
+                                            className="mt-3 space-y-2"
+                                        >
+                                            {actualPlayers.map((player, index) => (
+                                                <PlayerCard
+                                                    key={player.user_id || index}
+                                                    player={player}
+                                                    isCurrentUser={player.user_id === user?.id}
+                                                    isOnline={player.is_online}
+                                                />
+                                            ))}
+                                        </motion.div>
+                                    )}
+                                </AnimatePresence>
+                            </div>
+                        </div>
+
+                        {/* Dice Roller */}
+                        <div className="border-b border-gray-200 dark:border-gray-700 p-4">
+                            <div className="flex items-center space-x-2 mb-3">
+                                <CubeIcon className="w-5 h-5 text-blue-600" />
+                                <span className="font-medium text-gray-900 dark:text-white">Кубики</span>
+                            </div>
+                            <div className="space-y-3">
+                                <div className="flex items-center space-x-2">
+                                    <select
+                                        value={selectedDice}
+                                        onChange={(e) => setSelectedDice(e.target.value)}
+                                        className="flex-1 px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    >
+                                        <option value="d4">d4</option>
+                                        <option value="d6">d6</option>
+                                        <option value="d8">d8</option>
+                                        <option value="d10">d10</option>
+                                        <option value="d12">d12</option>
+                                        <option value="d20">d20</option>
+                                        <option value="d100">d100</option>
+                                    </select>
+                                    <input
+                                        type="number"
+                                        value={diceModifier}
+                                        onChange={(e) => setDiceModifier(parseInt(e.target.value) || 0)}
+                                        placeholder="Мод"
+                                        className="w-16 px-2 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    />
+                                </div>
+                                <Button
+                                    onClick={handleDiceRoll}
+                                    variant="dice"
+                                    size="default"
+                                    className="w-full"
+                                    disabled={!isConnected}
+                                >
+                                    <DiceIcon sides={selectedDice} className="w-4 h-4 mr-2" />
+                                    Бросить {selectedDice}
+                                    {diceModifier !== 0 && (diceModifier > 0 ? `+${diceModifier}` : `${diceModifier}`)}
+                                </Button>
+                                {!isConnected && (
+                                    <p className="text-xs text-red-500 mt-1">
+                                        Требуется подключение к серверу
+                                    </p>
                                 )}
                             </div>
+                        </div>
 
-                            {/* Chat */}
-                            <div className="flex-1 flex flex-col min-h-0">
-                                <div className="p-3 border-b border-gray-200 dark:border-gray-700">
-                                    <h3 className="font-semibold flex items-center">
-                                        <ChatBubbleLeftIcon className="w-5 h-5 mr-2" />
-                                        Чат игроков
-                                        <span className="ml-auto text-xs text-gray-500 dark:text-gray-400">
-                                        Только общение
-                                    </span>
-                                    </h3>
+                        {/* Chat Section */}
+                        <div className="flex-1 flex flex-col min-h-0">
+                            <div className="p-4 border-b border-gray-200 dark:border-gray-700">
+                                <div className="flex items-center space-x-2">
+                                    <ChatBubbleLeftIcon className="w-5 h-5 text-gray-600" />
+                                    <span className="font-medium text-gray-900 dark:text-white">Чат</span>
                                 </div>
+                            </div>
 
-                                <div className="flex-1 overflow-y-auto p-3 space-y-2 bg-gray-50 dark:bg-gray-900 min-h-[200px]">
-                                    {(() => {
-                                        const chatMessages = actualMessages?.filter(msg =>
-                                            msg.type === 'chat' || msg.message_type === 'chat'
-                                        ) || [];
-
-                                        if (chatMessages.length === 0) {
-                                            return (
-                                                <div className="text-center text-gray-500 dark:text-gray-400 py-8">
-                                                    <ChatBubbleLeftIcon className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                                                    <p className="text-sm font-medium mb-1">Чат пуст</p>
-                                                    <p className="text-xs">Общайтесь с другими игроками здесь!</p>
-                                                    <p className="text-xs mt-2 text-blue-500">
-                                                        💡 Игровые действия отображаются в основной области
-                                                    </p>
-                                                </div>
-                                            );
-                                        }
-
-                                        return chatMessages.map((message) => (
-                                            <div key={message.id} className="p-2 rounded bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-colors">
-                                                <div className="flex items-center justify-between mb-1">
-                                                    <div className="text-xs text-blue-700 dark:text-blue-300 font-medium flex items-center">
-                                                        <span className="w-2 h-2 bg-blue-500 rounded-full mr-2"></span>
-                                                        {message.sender || message.sender_name || message.author}
-                                                    </div>
-                                                    <div className="text-xs text-blue-600 dark:text-blue-400 opacity-60">
-                                                        {new Date(message.timestamp).toLocaleTimeString()}
-                                                    </div>
-                                                </div>
-                                                <div className="text-sm text-blue-900 dark:text-blue-100 leading-relaxed">
-                                                    {message.content}
-                                                </div>
-                                            </div>
-                                        ));
-                                    })()}
-                                </div>
-
-                                <div className="p-3 border-t border-gray-200 dark:border-gray-700">
-                                    <div className="space-y-2">
-                                        <div className="flex space-x-2">
-                                            <input
-                                                type="text"
-                                                value={chatInput}
-                                                onChange={(e) => setChatInput(e.target.value)}
-                                                onKeyDown={(e) => {
-                                                    if (e.key === 'Enter') {
-                                                        handleChatSubmit();
-                                                    }
-                                                }}
-                                                placeholder={wsConnected ? "Напишите сообщение другим игрокам..." : "Отключено от сервера"}
-                                                disabled={!wsConnected}
-                                                className="flex-1 px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm disabled:opacity-50"
-                                            />
-                                            <Button
-                                                onClick={handleChatSubmit}
-                                                disabled={!chatInput.trim() || !wsConnected}
-                                                size="sm"
-                                                title="Отправить сообщение в чат"
-                                            >
-                                                <PaperAirplaneIcon className="w-4 h-4" />
-                                            </Button>
+                            <div className="flex-1 overflow-y-auto p-3 space-y-2 bg-gray-50 dark:bg-gray-900">
+                                {actualMessages.filter(msg => msg.type === 'chat' || msg.type === 'ooc').map((message, index) => (
+                                    <div key={message.id || index} className="text-sm">
+                                        <div className="flex items-center space-x-2 mb-1">
+                                            <span className="font-medium text-gray-900 dark:text-white">
+                                                {message.author}:
+                                            </span>
+                                            <span className="text-xs text-gray-500 dark:text-gray-400">
+                                                {new Date(message.timestamp).toLocaleTimeString('ru-RU', {
+                                                    hour: '2-digit',
+                                                    minute: '2-digit'
+                                                })}
+                                            </span>
                                         </div>
-                                        {!wsConnected && (
-                                            <p className="text-xs text-red-500">Отключено от сервера</p>
-                                        )}
-                                        <p className="text-xs text-gray-500 dark:text-gray-400">
-                                            💬 Это чат для общения между игроками. Игровые действия вводите в поле выше.
+                                        <p className="text-gray-700 dark:text-gray-300 ml-2">
+                                            {message.content}
                                         </p>
                                     </div>
-                                </div>
+                                ))}
+                                <div ref={chatEndRef} />
+                            </div>
+
+                            <div className="p-3 border-t border-gray-200 dark:border-gray-700">
+                                <form onSubmit={handleChatSubmit} className="flex space-x-2">
+                                    <input
+                                        type="text"
+                                        value={chatInput}
+                                        onChange={(e) => setChatInput(e.target.value)}
+                                        placeholder={isConnected ? "Сообщение..." : "Нет подключения"}
+                                        disabled={!isConnected}
+                                        className="flex-1 px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm disabled:opacity-50"
+                                    />
+                                    <Button
+                                        type="submit"
+                                        disabled={!chatInput.trim() || !isConnected}
+                                        variant="default"
+                                        size="sm"
+                                    >
+                                        <PaperAirplaneIcon className="w-4 h-4" />
+                                    </Button>
+                                </form>
                             </div>
                         </div>
                     </div>
                 </div>
+
+                {/* Mobile Layout */}
+                <div className="lg:hidden flex-1 flex flex-col">
+                    {/* Tab Content */}
+                    <div className="flex-1 overflow-hidden">
+                        {/* Scene Tab */}
+                        {activeTab === 'scene' && (
+                            <div className="h-full flex flex-col bg-white dark:bg-gray-800">
+                                {/* Scene Info */}
+                                <div className="border-b border-gray-200 dark:border-gray-700 p-4">
+                                    <div className="space-y-2">
+                                        <div className="flex flex-wrap items-center gap-2 text-sm">
+                                            <div className="flex items-center space-x-1">
+                                                <MapIcon className="w-4 h-4 text-gray-500" />
+                                                <span className="font-medium text-gray-900 dark:text-white">
+                                                    {actualCurrentScene?.location || 'Неизвестная локация'}
+                                                </span>
+                                            </div>
+                                            <div className="flex items-center space-x-1">
+                                                <CloudSolid className="w-4 h-4 text-gray-500" />
+                                                <span className="text-gray-600 dark:text-gray-400">
+                                                    {actualCurrentScene?.weather || 'Ясно'}
+                                                </span>
+                                            </div>
+                                        </div>
+
+                                        <div className="p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                                            <p className="text-sm text-gray-700 dark:text-gray-300 leading-relaxed">
+                                                {actualCurrentScene?.description || 'Описание сцены загружается...'}
+                                            </p>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Messages */}
+                                <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50 dark:bg-gray-900">
+                                    {actualMessages.map((message, index) => (
+                                        <ChatMessage
+                                            key={message.id || index}
+                                            message={message}
+                                            isCurrentUser={message.author === user?.username}
+                                        />
+                                    ))}
+                                    <div ref={messagesEndRef} />
+                                </div>
+
+                                {/* Action Input */}
+                                <div className="border-t border-gray-200 dark:border-gray-700 p-4 bg-white dark:bg-gray-800">
+                                    <form onSubmit={handleActionSubmit} className="space-y-3">
+                                        <div className="flex items-center space-x-2">
+                                            <CommandLineIcon className="w-5 h-5 text-purple-600" />
+                                            <span className="font-medium text-gray-900 dark:text-white">Действие</span>
+                                        </div>
+                                        <div className="flex space-x-2">
+                                            <input
+                                                type="text"
+                                                value={actionInput}
+                                                onChange={(e) => setActionInput(e.target.value)}
+                                                placeholder="Что делает ваш персонаж?"
+                                                disabled={!isConnected}
+                                                className="flex-1 px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:opacity-50"
+                                            />
+                                            <Button
+                                                type="submit"
+                                                disabled={!actionInput.trim() || !isConnected}
+                                                variant="magic"
+                                                size="default"
+                                            >
+                                                <PaperAirplaneIcon className="w-4 h-4" />
+                                            </Button>
+                                        </div>
+                                        {!isConnected && (
+                                            <p className="text-xs text-red-500">
+                                                {connectionError || 'Нет подключения к серверу'}
+                                            </p>
+                                        )}
+                                    </form>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Chat Tab */}
+                        {activeTab === 'chat' && (
+                            <div className="h-full flex flex-col bg-white dark:bg-gray-800">
+                                {/* Dice Roller */}
+                                <div className="border-b border-gray-200 dark:border-gray-700 p-4">
+                                    <div className="flex items-center space-x-2 mb-3">
+                                        <CubeIcon className="w-5 h-5 text-blue-600" />
+                                        <span className="font-medium text-gray-900 dark:text-white">Кубики</span>
+                                    </div>
+                                    <div className="flex items-center space-x-2">
+                                        <select
+                                            value={selectedDice}
+                                            onChange={(e) => setSelectedDice(e.target.value)}
+                                            className="flex-1 px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                        >
+                                            <option value="d4">d4</option>
+                                            <option value="d6">d6</option>
+                                            <option value="d8">d8</option>
+                                            <option value="d10">d10</option>
+                                            <option value="d12">d12</option>
+                                            <option value="d20">d20</option>
+                                            <option value="d100">d100</option>
+                                        </select>
+                                        <input
+                                            type="number"
+                                            value={diceModifier}
+                                            onChange={(e) => setDiceModifier(parseInt(e.target.value) || 0)}
+                                            placeholder="Мод"
+                                            className="w-16 px-2 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                        />
+                                        <Button
+                                            onClick={handleDiceRoll}
+                                            variant="dice"
+                                            size="sm"
+                                            disabled={!isConnected}
+                                        >
+                                            <DiceIcon sides={selectedDice} className="w-4 h-4" />
+                                        </Button>
+                                    </div>
+                                </div>
+
+                                {/* Chat Messages */}
+                                <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-gray-50 dark:bg-gray-900">
+                                    {actualMessages.filter(msg => msg.type === 'chat' || msg.type === 'ooc').map((message, index) => (
+                                        <div key={message.id || index} className="text-sm">
+                                            <div className="flex items-center space-x-2 mb-1">
+                                                <span className="font-medium text-gray-900 dark:text-white">
+                                                    {message.author}:
+                                                </span>
+                                                <span className="text-xs text-gray-500 dark:text-gray-400">
+                                                    {new Date(message.timestamp).toLocaleTimeString('ru-RU', {
+                                                        hour: '2-digit',
+                                                        minute: '2-digit'
+                                                    })}
+                                                </span>
+                                            </div>
+                                            <p className="text-gray-700 dark:text-gray-300 ml-2">
+                                                {message.content}
+                                            </p>
+                                        </div>
+                                    ))}
+                                    <div ref={chatEndRef} />
+                                </div>
+
+                                {/* Chat Input */}
+                                <div className="border-t border-gray-200 dark:border-gray-700 p-4 bg-white dark:bg-gray-800">
+                                    <form onSubmit={handleChatSubmit} className="flex space-x-2">
+                                        <input
+                                            type="text"
+                                            value={chatInput}
+                                            onChange={(e) => setChatInput(e.target.value)}
+                                            placeholder={isConnected ? "Сообщение..." : "Нет подключения"}
+                                            disabled={!isConnected}
+                                            className="flex-1 px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm disabled:opacity-50"
+                                        />
+                                        <Button
+                                            type="submit"
+                                            disabled={!chatInput.trim() || !isConnected}
+                                            variant="default"
+                                            size="default"
+                                        >
+                                            <PaperAirplaneIcon className="w-4 h-4" />
+                                        </Button>
+                                    </form>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Players Tab */}
+                        {activeTab === 'players' && (
+                            <div className="h-full overflow-y-auto p-4 space-y-4 bg-gray-50 dark:bg-gray-900">
+                                {actualPlayers.map((player, index) => (
+                                    <PlayerCard
+                                        key={player.user_id || index}
+                                        player={player}
+                                        isCurrentUser={player.user_id === user?.id}
+                                        isOnline={player.is_online}
+                                        className="w-full"
+                                    />
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                </div>
             </div>
         </div>
-            );
-            };
+    );
+};
 
-            export default GamePage;
+export default GamePage;
