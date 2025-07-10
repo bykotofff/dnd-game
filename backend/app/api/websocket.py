@@ -454,11 +454,13 @@ async def handle_ai_response_with_dice_check(game_id: str, player_action: str, c
 async def request_dice_roll(game_id: str, dice_analysis: dict, player_name: str, original_action: str):
     """Запрос броска кубиков от игрока"""
     try:
-        roll_type = dice_analysis.get("roll_type", "skill_check")
-        ability_or_skill = dice_analysis.get("ability_or_skill", "perception")
-        dc = dice_analysis.get("dc", 15)
-        advantage = dice_analysis.get("advantage", False)
-        disadvantage = dice_analysis.get("disadvantage", False)
+        roll_type = dice_analysis.get("roll_type", "проверка_навыка")
+        ability_or_skill = dice_analysis.get("ability_or_skill", "восприятие")
+        dc = int(dice_analysis.get("suggested_dc", 15))
+        advantage_disadvantage = dice_analysis.get("advantage_disadvantage", "обычно")
+
+        advantage = advantage_disadvantage == "преимущество"
+        disadvantage = advantage_disadvantage == "помеха"
 
         # Формируем сообщение с запросом броска
         roll_request_msg = f"""🎲 **{player_name}**, для действия "{original_action}" требуется проверка!
@@ -469,7 +471,17 @@ async def request_dice_roll(game_id: str, dice_analysis: dict, player_name: str,
 {f"**Преимущество:** Да ✅" if advantage else ""}
 {f"**Помеха:** Да ⚠️" if disadvantage else ""}
 
-Бросьте d20 и добавьте модификатор {ability_or_skill}!"""
+Используйте кнопку "Бросить кости" и укажите: **d20+модификатор**"""
+
+        # Подготавливаем данные для сохранения
+        check_data = {
+            "roll_type": roll_type,
+            "ability_or_skill": ability_or_skill,
+            "dc": dc,
+            "advantage": advantage,
+            "disadvantage": disadvantage,
+            "original_action": original_action
+        }
 
         # Отправляем запрос броска
         roll_request = WebSocketMessage("roll_request", {
@@ -482,18 +494,21 @@ async def request_dice_roll(game_id: str, dice_analysis: dict, player_name: str,
             "advantage": advantage,
             "disadvantage": disadvantage,
             "original_action": original_action,
-            "requesting_player": player_name
+            "requesting_player": player_name,
+            "requires_dice_roll": True  # ✅ Важный флаг для фронтенда
         })
 
         await manager.broadcast_to_game(roll_request.to_json(), game_id)
 
-        # Сохраняем ожидающую проверку в Redis для последующей обработки
-        await store_pending_roll_check(game_id, player_name, dice_analysis, original_action)
+        # ✅ Сохраняем ожидающую проверку в Redis для последующей обработки
+        await store_pending_roll_check(game_id, player_name, check_data, original_action)
 
         logger.info(f"Dice roll requested for {player_name} in game {game_id}")
 
     except Exception as e:
         logger.error(f"Error requesting dice roll: {e}")
+        # В случае ошибки отправляем обычный ответ ИИ
+        await send_fallback_ai_response(game_id, original_action, player_name)
 
 
 async def handle_dice_roll(websocket: WebSocket, game_id: str, user_id: str, user: User, data: Dict[str, Any], db: AsyncSession):
@@ -504,6 +519,7 @@ async def handle_dice_roll(websocket: WebSocket, game_id: str, user_id: str, use
 
     try:
         # Выполняем бросок
+        from app.services.dice_service import dice_service
         result = dice_service.roll_dice(notation)
 
         # Создаем сообщение о броске
@@ -522,10 +538,15 @@ async def handle_dice_roll(websocket: WebSocket, game_id: str, user_id: str, use
         # ✅ НОВОЕ: Проверяем, есть ли ожидающая проверка для этого игрока
         pending_check = await get_pending_roll_check(game_id, user.username)
         if pending_check:
+            logger.info(f"Processing pending dice check for {user.username}")
+
             # Обрабатываем результат проверки
             await process_dice_check_result(game_id, user.username, result, pending_check)
+
             # Удаляем ожидающую проверку
             await clear_pending_roll_check(game_id, user.username)
+        else:
+            logger.info(f"No pending check found for {user.username}, this was a regular dice roll")
 
     except Exception as e:
         logger.error(f"Error rolling dice: {e}")
@@ -533,64 +554,75 @@ async def handle_dice_roll(websocket: WebSocket, game_id: str, user_id: str, use
         await websocket.send_text(error_msg.to_json())
 
 
-async def process_dice_check_result(game_id: str, player_name: str, roll_result: int, pending_check: dict):
+async def process_dice_check_result(game_id: str, player_name: str, roll_result: dict, pending_check: dict):
     """Обработка результата проверки кубиками"""
     try:
         dc = pending_check.get("dc", 15)
         original_action = pending_check.get("original_action", "unknown action")
         roll_type = pending_check.get("roll_type", "skill_check")
 
-        success = roll_result >= dc
+        # Получаем общий результат броска
+        total_roll = roll_result.get("total", 0)
+        success = total_roll >= dc
 
         # Формируем контекст для ИИ с результатом проверки
+        roll_details = {
+            "total": total_roll,
+            "rolls": roll_result.get("rolls", []),
+            "notation": roll_result.get("notation", "d20"),
+            "details": roll_result.get("details", "")
+        }
+
         context = {
             "player_name": player_name,
             "original_action": original_action,
             "roll_type": roll_type,
-            "roll_result": roll_result,
-            "dc": dc,
-            "success": success,
-            "margin": abs(roll_result - dc)
+            "current_scene": "Проверка навыка/характеристики"
         }
 
-        # Генерируем ответ ИИ на основе результата проверки
-        ai_response = await ai_service.generate_dm_response(
-            game_id=game_id,
-            player_action=f"РЕЗУЛЬТАТ ПРОВЕРКИ: {player_name} бросил {roll_result} против DC {dc} для действия '{original_action}'. {'УСПЕХ' if success else 'НЕУДАЧА'}.",
-            game_context=context,
-            character_sheets=[{"name": player_name}],
-            recent_messages=[]
+        # ✅ Используем специальный метод для генерации ответа на бросок
+        ai_response = await ai_service.generate_dice_result_response(
+            action=original_action,
+            roll_result=roll_details,
+            dc=dc,
+            character_name=player_name,
+            game_context=context
         )
 
         if not ai_response:
             # Генерируем базовый ответ если ИИ не ответил
             if success:
-                ai_response = f"🎯 **{player_name}** успешно выполняет действие! (Бросок: {roll_result}, нужно было: {dc})"
+                ai_response = f"🎯 **{player_name}** успешно выполняет действие '{original_action}'! (Бросок: {total_roll}, нужно было: {dc})\n\nЧто вы делаете дальше?"
             else:
-                ai_response = f"❌ **{player_name}** терпит неудачу в попытке. (Бросок: {roll_result}, нужно было: {dc})"
+                ai_response = f"❌ **{player_name}** терпит неудачу в попытке '{original_action}'. (Бросок: {total_roll}, нужно было: {dc})\n\nКак вы отреагируете на неудачу?"
 
         # Отправляем результат проверки
         check_result_msg = WebSocketMessage("dice_check_result", {
             "message": ai_response,
             "sender_name": "ИИ Мастер",
             "timestamp": datetime.utcnow().isoformat(),
-            "roll_result": roll_result,
+            "roll_result": total_roll,
             "dc": dc,
             "success": success,
             "original_action": original_action,
-            "player_name": player_name
+            "player_name": player_name,
+            "is_dice_check_result": True  # ✅ Флаг для фронтенда
         })
 
         await manager.broadcast_to_game(check_result_msg.to_json(), game_id)
-        logger.info(f"Dice check result processed for {player_name}: {success}")
+        logger.info(f"Dice check result processed for {player_name}: {'SUCCESS' if success else 'FAILURE'} ({total_roll} vs DC {dc})")
 
     except Exception as e:
-        logger.error(f"Error processing dice check result: {e}")
+        logger.error(f"Error processing dice check result: {e}", exc_info=True)
 
 
 def get_roll_type_description(roll_type: str) -> str:
     """Получить описание типа броска"""
     descriptions = {
+        "проверка_навыка": "Проверка навыка",
+        "проверка_характеристики": "Проверка характеристики",
+        "атака": "Бросок атаки",
+        "спасбросок": "Спасительный бросок",
         "skill_check": "Проверка навыка",
         "ability_check": "Проверка характеристики",
         "attack": "Бросок атаки",
@@ -598,10 +630,23 @@ def get_roll_type_description(roll_type: str) -> str:
     }
     return descriptions.get(roll_type, "Проверка")
 
-
 def get_ability_description(ability: str) -> str:
     """Получить описание характеристики/навыка"""
     descriptions = {
+        "атлетика": "Атлетика (Сила)",
+        "восприятие": "Восприятие (Мудрость)",
+        "расследование": "Расследование (Интеллект)",
+        "скрытность": "Скрытность (Ловкость)",
+        "убеждение": "Убеждение (Харизма)",
+        "обман": "Обман (Харизма)",
+        "проницательность": "Проницательность (Мудрость)",
+        "ловкость": "Ловкость",
+        "сила": "Сила",
+        "телосложение": "Телосложение",
+        "интеллект": "Интеллект",
+        "мудрость": "Мудрость",
+        "харизма": "Харизма",
+        # Английские варианты
         "athletics": "Атлетика (Сила)",
         "perception": "Восприятие (Мудрость)",
         "investigation": "Расследование (Интеллект)",
@@ -620,16 +665,17 @@ def get_ability_description(ability: str) -> str:
 
 
 # Функции для работы с Redis (хранение ожидающих проверок)
-async def store_pending_roll_check(game_id: str, player_name: str, dice_analysis: dict, original_action: str):
+async def store_pending_roll_check(game_id: str, player_name: str, check_data: dict, original_action: str):
     """Сохранить ожидающую проверку в Redis"""
     try:
         key = f"pending_roll:{game_id}:{player_name}"
         data = {
-            **dice_analysis,
+            **check_data,
             "original_action": original_action,
             "timestamp": datetime.utcnow().isoformat()
         }
         await redis_client.set_with_expiry(key, data, 300)  # 5 минут
+        logger.info(f"Stored pending roll check for {player_name} in game {game_id}")
     except Exception as e:
         logger.error(f"Error storing pending roll check: {e}")
 
@@ -638,7 +684,9 @@ async def get_pending_roll_check(game_id: str, player_name: str) -> dict:
     """Получить ожидающую проверку из Redis"""
     try:
         key = f"pending_roll:{game_id}:{player_name}"
-        return await redis_client.get_json(key)
+        result = await redis_client.get_json(key)
+        logger.info(f"Retrieved pending roll check for {player_name}: {result is not None}")
+        return result
     except Exception as e:
         logger.error(f"Error getting pending roll check: {e}")
         return None
@@ -649,6 +697,7 @@ async def clear_pending_roll_check(game_id: str, player_name: str):
     try:
         key = f"pending_roll:{game_id}:{player_name}"
         await redis_client.delete(key)
+        logger.info(f"Cleared pending roll check for {player_name}")
     except Exception as e:
         logger.error(f"Error clearing pending roll check: {e}")
 
@@ -667,6 +716,7 @@ async def send_fallback_ai_response(game_id: str, player_action: str, player_nam
 
     try:
         await manager.broadcast_to_game(fallback_msg.to_json(), game_id)
+        logger.info(f"Sent fallback AI response for {player_name}")
     except Exception as e:
         logger.error(f"Failed to send fallback AI response: {e}")
 
@@ -678,7 +728,7 @@ async def handle_dice_roll(websocket: WebSocket, game_id: str, user_id: str, use
 
     try:
         # Выполняем бросок
-        result = dice_service.roll_dice(notation)
+        result = dice_service.roll_from_notation(notation)
 
         # Создаем сообщение о броске
         dice_msg = WebSocketMessage("dice_roll", {
