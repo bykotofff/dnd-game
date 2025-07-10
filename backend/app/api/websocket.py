@@ -518,14 +518,26 @@ async def handle_dice_roll(websocket: WebSocket, game_id: str, user_id: str, use
         return
 
     try:
-        # Выполняем бросок
+        # ✅ ИСПРАВЛЕНО: Используем правильный метод roll_from_notation
         from app.services.dice_service import dice_service
-        result = dice_service.roll_dice(notation)
+        dice_result = dice_service.roll_from_notation(notation)
+
+        # ✅ ИСПРАВЛЕНО: Преобразуем DiceResult в dict для JSON
+        result_dict = {
+            "notation": dice_result.notation,
+            "individual_rolls": dice_result.individual_rolls,
+            "modifiers": dice_result.modifiers,
+            "total": dice_result.total,
+            "is_critical": dice_result.is_critical,
+            "is_advantage": dice_result.is_advantage,
+            "is_disadvantage": dice_result.is_disadvantage,
+            "details": str(dice_result)
+        }
 
         # Создаем сообщение о броске
         dice_msg = WebSocketMessage("dice_roll", {
             "notation": notation,
-            "result": result,
+            "result": result_dict,
             "player_id": user_id,
             "player_name": user.username,
             "purpose": data.get("purpose", ""),
@@ -540,8 +552,8 @@ async def handle_dice_roll(websocket: WebSocket, game_id: str, user_id: str, use
         if pending_check:
             logger.info(f"Processing pending dice check for {user.username}")
 
-            # Обрабатываем результат проверки
-            await process_dice_check_result(game_id, user.username, result, pending_check)
+            # ✅ ИСПРАВЛЕНО: Передаем dict вместо DiceResult
+            await process_dice_check_result(game_id, user.username, result_dict, pending_check)
 
             # Удаляем ожидающую проверку
             await clear_pending_roll_check(game_id, user.username)
@@ -549,8 +561,8 @@ async def handle_dice_roll(websocket: WebSocket, game_id: str, user_id: str, use
             logger.info(f"No pending check found for {user.username}, this was a regular dice roll")
 
     except Exception as e:
-        logger.error(f"Error rolling dice: {e}")
-        error_msg = WebSocketMessage("error", {"message": "Failed to roll dice"})
+        logger.error(f"Error rolling dice: {e}", exc_info=True)
+        error_msg = WebSocketMessage("error", {"message": f"Failed to roll dice: {str(e)}"})
         await websocket.send_text(error_msg.to_json())
 
 

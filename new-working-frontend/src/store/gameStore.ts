@@ -277,6 +277,80 @@ export const useGameStore = create<GameState>()(
                     });
                 });
 
+                // ✅ НОВЫЙ: Обработчик ответов ИИ Мастера
+                websocketService.on('ai_response', (data: any) => {
+                    console.log('Received AI response:', data);
+
+                    const aiMessage: GameMessage = {
+                        id: `ai-${Date.now()}`,
+                        type: 'dm' as const,
+                        author: data.sender_name || 'ИИ Мастер',
+                        content: data.message,
+                        timestamp: new Date(data.timestamp || Date.now()),
+                        metadata: {
+                            in_response_to: data.in_response_to,
+                            responding_to_player: data.responding_to_player,
+                            is_fallback: data.is_fallback
+                        }
+                    };
+
+                    get().addMessage(aiMessage);
+                });
+
+                // ✅ НОВЫЙ: Обработчик запросов на бросок кубиков
+                websocketService.on('roll_request', (data: any) => {
+                    console.log('Received roll request:', data);
+
+                    const rollRequestMessage: GameMessage = {
+                        id: `roll-request-${Date.now()}`,
+                        type: 'system' as const,
+                        author: data.sender_name || 'ИИ Мастер',
+                        content: data.message,
+                        timestamp: new Date(data.timestamp || Date.now()),
+                        metadata: {
+                            requires_dice_roll: data.requires_dice_roll,
+                            roll_type: data.roll_type,
+                            ability_or_skill: data.ability_or_skill,
+                            dc: data.dc,
+                            advantage: data.advantage,
+                            disadvantage: data.disadvantage,
+                            original_action: data.original_action,
+                            requesting_player: data.requesting_player
+                        }
+                    };
+
+                    get().addMessage(rollRequestMessage);
+                    set({ showDiceRoller: true });
+                    console.log(`Требуется проверка: ${data.ability_or_skill} (DC ${data.dc})`);
+                });
+
+                // ✅ НОВЫЙ: Обработчик результатов проверок кубиков
+                websocketService.on('dice_check_result', (data: any) => {
+                    console.log('Received dice check result:', data);
+
+                    const checkResultMessage: GameMessage = {
+                        id: `check-result-${Date.now()}`,
+                        type: 'dm' as const,
+                        author: data.sender_name || 'ИИ Мастер',
+                        content: data.message,
+                        timestamp: new Date(data.timestamp || Date.now()),
+                        metadata: {
+                            is_dice_check_result: data.is_dice_check_result,
+                            roll_result: data.roll_result,
+                            dc: data.dc,
+                            success: data.success,
+                            original_action: data.original_action,
+                            player_name: data.player_name
+                        }
+                    };
+
+                    get().addMessage(checkResultMessage);
+
+                    const successIcon = data.success ? '🎯' : '❌';
+                    const resultText = data.success ? 'Успех!' : 'Неудача';
+                    console.log(`${successIcon} ${resultText} (${data.roll_result}/${data.dc})`);
+                });
+
             } catch (error: any) {
                 console.error('Failed to connect to game:', error);
                 set({
