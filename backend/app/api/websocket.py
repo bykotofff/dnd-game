@@ -452,7 +452,7 @@ async def handle_ai_response_with_dice_check(game_id: str, player_action: str, c
 
 
 async def request_dice_roll(game_id: str, dice_analysis: dict, player_name: str, original_action: str):
-    """Запрос броска кубиков от игрока"""
+    """Запрос броска кубиков от игрока (улучшенная версия)"""
     try:
         roll_type = dice_analysis.get("roll_type", "проверка_навыка")
         ability_or_skill = dice_analysis.get("ability_or_skill", "восприятие")
@@ -462,16 +462,64 @@ async def request_dice_roll(game_id: str, dice_analysis: dict, player_name: str,
         advantage = advantage_disadvantage == "преимущество"
         disadvantage = advantage_disadvantage == "помеха"
 
-        # Формируем сообщение с запросом броска
-        roll_request_msg = f"""🎲 **{player_name}**, для действия "{original_action}" требуется проверка!
+        # ✅ УЛУЧШЕНО: Более атмосферное сообщение без раскрытия DC
+        skill_names = {
+            "ловкость": "Ловкость",
+            "сила": "Сила",
+            "телосложение": "Телосложение",
+            "интеллект": "Интеллект",
+            "мудрость": "Мудрость",
+            "харизма": "Харизма",
+            "скрытность": "Скрытность",
+            "восприятие": "Восприятие",
+            "атлетика": "Атлетика",
+            "убеждение": "Убеждение",
+            "обман": "Обман",
+            "запугивание": "Запугивание",
+            "проницательность": "Проницательность",
+            "расследование": "Расследование",
+            "медицина": "Медицина",
+            "природа": "Природа",
+            "религия": "Религия",
+            "магия": "Магия",
+            "история": "История",
+            "выживание": "Выживание",
+            "обращение_с_животными": "Обращение с животными",
+            "акробатика": "Акробатика",
+            "ловкость_рук": "Ловкость рук",
+            "взлом": "Взлом",
+            "выступление": "Выступление"
+        }
 
-**Тип проверки:** {get_roll_type_description(roll_type)}
-**Навык/Характеристика:** {get_ability_description(ability_or_skill)}
-**Сложность (DC):** {dc}
-{f"**Преимущество:** Да ✅" if advantage else ""}
-{f"**Помеха:** Да ⚠️" if disadvantage else ""}
+        skill_display = skill_names.get(ability_or_skill.lower(), ability_or_skill.title())
 
-Используйте кнопку "Бросить кости" и укажите: **d20+модификатор**"""
+        # Определяем тип кубика и модификатор
+        dice_notation = "1d20"
+        modifier = get_skill_modifier(ability_or_skill, player_name)  # Получаем модификатор персонажа
+
+        # Формируем атмосферное сообщение
+        action_descriptions = {
+            "скрытность": "осторожно двигается в тенях",
+            "восприятие": "внимательно осматривается",
+            "атлетика": "напрягает мышцы для физического усилия",
+            "убеждение": "подбирает убедительные слова",
+            "обман": "пытается ввести в заблуждение",
+            "магия": "концентрируется на магических энергиях",
+            "расследование": "ищет улики и подсказки",
+            "мудрость": "полагается на житейскую мудрость",
+            "интеллект": "задействует свои знания",
+            "ловкость": "полагается на быстроту и ловкость"
+        }
+
+        action_desc = action_descriptions.get(ability_or_skill.lower(), f"использует навык {skill_display}")
+
+        # Создаем более естественное сообщение
+        roll_request_msg = f"**{player_name}** {action_desc}. Сделайте проверку **{skill_display}**!"
+
+        if advantage:
+            roll_request_msg += " *(с преимуществом)*"
+        elif disadvantage:
+            roll_request_msg += " *(с помехой)*"
 
         # Подготавливаем данные для сохранения
         check_data = {
@@ -480,35 +528,81 @@ async def request_dice_roll(game_id: str, dice_analysis: dict, player_name: str,
             "dc": dc,
             "advantage": advantage,
             "disadvantage": disadvantage,
-            "original_action": original_action
+            "original_action": original_action,
+            "dice_notation": dice_notation,
+            "modifier": modifier,
+            "skill_display": skill_display
         }
 
-        # Отправляем запрос броска
+        # Отправляем запрос броска с инструкциями для игрока
         roll_request = WebSocketMessage("roll_request", {
             "message": roll_request_msg,
             "sender_name": "ИИ Мастер",
             "timestamp": datetime.utcnow().isoformat(),
             "roll_type": roll_type,
             "ability_or_skill": ability_or_skill,
-            "dc": dc,
+            "skill_display": skill_display,
+            "dice_notation": dice_notation,
+            "modifier": modifier,
             "advantage": advantage,
             "disadvantage": disadvantage,
             "original_action": original_action,
             "requesting_player": player_name,
-            "requires_dice_roll": True  # ✅ Важный флаг для фронтенда
+            "requires_dice_roll": True,
+            "auto_modifier": True  # ✅ Флаг для автоматического добавления модификатора
         })
 
         await manager.broadcast_to_game(roll_request.to_json(), game_id)
 
-        # ✅ Сохраняем ожидающую проверку в Redis для последующей обработки
+        # ✅ Сохраняем ожидающую проверку в Redis
         await store_pending_roll_check(game_id, player_name, check_data, original_action)
 
-        logger.info(f"Dice roll requested for {player_name} in game {game_id}")
+        logger.info(f"Dice roll requested for {player_name}: {skill_display} check (DC {dc})")
 
     except Exception as e:
         logger.error(f"Error requesting dice roll: {e}")
         # В случае ошибки отправляем обычный ответ ИИ
         await send_fallback_ai_response(game_id, original_action, player_name)
+
+def get_skill_modifier(ability_or_skill: str, player_name: str) -> int:
+    """Получить модификатор навыка для персонажа"""
+    # ✅ TODO: В будущем здесь будет загрузка реальных характеристик персонажа из БД
+    # Пока используем базовые значения
+
+    base_modifiers = {
+        # Характеристики (базовый модификатор +2 для уровня 1-4)
+        "сила": 2,
+        "ловкость": 3,
+        "телосложение": 1,
+        "интеллект": 1,
+        "мудрость": 2,
+        "харизма": 0,
+
+        # Навыки (характеристика + бонус мастерства +2)
+        "атлетика": 4,  # Сила + мастерство
+        "акробатика": 3,  # Ловкость
+        "ловкость_рук": 3,  # Ловкость
+        "скрытность": 5,  # Ловкость + мастерство
+        "магия": 3,  # Интеллект + мастерство
+        "история": 1,  # Интеллект
+        "расследование": 3,  # Интеллект + мастерство
+        "природа": 1,  # Интеллект
+        "религия": 1,  # Интеллект
+        "обращение_с_животными": 2,  # Мудрость
+        "проницательность": 4,  # Мудрость + мастерство
+        "медицина": 2,  # Мудрость
+        "восприятие": 4,  # Мудрость + мастерство
+        "выживание": 2,  # Мудрость
+        "обман": 0,  # Харизма
+        "запугивание": 0,  # Харизма
+        "выступление": 0,  # Харизма
+        "убеждение": 2,  # Харизма + мастерство
+    }
+
+    return base_modifiers.get(ability_or_skill.lower(), 0)
+
+
+
 
 
 async def handle_dice_roll(websocket: WebSocket, game_id: str, user_id: str, user: User, data: Dict[str, Any], db: AsyncSession):
@@ -567,35 +661,45 @@ async def handle_dice_roll(websocket: WebSocket, game_id: str, user_id: str, use
 
 
 async def process_dice_check_result(game_id: str, player_name: str, roll_result: dict, pending_check: dict):
-    """Обработка результата проверки кубиками"""
+    """Обработка результата проверки кубиками (улучшенная версия)"""
     try:
         dc = pending_check.get("dc", 15)
         original_action = pending_check.get("original_action", "unknown action")
         roll_type = pending_check.get("roll_type", "skill_check")
+        skill_display = pending_check.get("skill_display", "навык")
+        modifier = pending_check.get("modifier", 0)
 
-        # Получаем общий результат броска
-        total_roll = roll_result.get("total", 0)
-        success = total_roll >= dc
+        # Получаем базовый результат броска (без модификатора)
+        base_roll = roll_result.get("total", 0)
 
-        # Формируем контекст для ИИ с результатом проверки
-        roll_details = {
-            "total": total_roll,
-            "rolls": roll_result.get("rolls", []),
-            "notation": roll_result.get("notation", "d20"),
-            "details": roll_result.get("details", "")
-        }
+        # ✅ ИСПРАВЛЕНО: Автоматически добавляем модификатор
+        final_total = base_roll + modifier
+        success = final_total >= dc
 
+        # Формируем контекст для ИИ
         context = {
             "player_name": player_name,
             "original_action": original_action,
             "roll_type": roll_type,
+            "skill_display": skill_display,
+            "base_roll": base_roll,
+            "modifier": modifier,
+            "final_total": final_total,
+            "dc": dc,
+            "success": success,
             "current_scene": "Проверка навыка/характеристики"
         }
 
         # ✅ Используем специальный метод для генерации ответа на бросок
         ai_response = await ai_service.generate_dice_result_response(
             action=original_action,
-            roll_result=roll_details,
+            roll_result={
+                "base_roll": base_roll,
+                "modifier": modifier,
+                "total": final_total,
+                "success": success,
+                "skill": skill_display
+            },
             dc=dc,
             character_name=player_name,
             game_context=context
@@ -603,26 +707,32 @@ async def process_dice_check_result(game_id: str, player_name: str, roll_result:
 
         if not ai_response:
             # Генерируем базовый ответ если ИИ не ответил
+            modifier_text = f"+{modifier}" if modifier > 0 else str(modifier) if modifier < 0 else ""
+            roll_text = f"[{base_roll}{modifier_text} = {final_total}]"
+
             if success:
-                ai_response = f"🎯 **{player_name}** успешно выполняет действие '{original_action}'! (Бросок: {total_roll}, нужно было: {dc})\n\nЧто вы делаете дальше?"
+                ai_response = f"🎯 **{player_name}** успешно выполняет {original_action}! {roll_text}\n\nЧто вы делаете дальше?"
             else:
-                ai_response = f"❌ **{player_name}** терпит неудачу в попытке '{original_action}'. (Бросок: {total_roll}, нужно было: {dc})\n\nКак вы отреагируете на неудачу?"
+                ai_response = f"❌ **{player_name}** терпит неудачу в попытке {original_action}. {roll_text}\n\nКак вы отреагируете на неудачу?"
 
         # Отправляем результат проверки
         check_result_msg = WebSocketMessage("dice_check_result", {
             "message": ai_response,
             "sender_name": "ИИ Мастер",
             "timestamp": datetime.utcnow().isoformat(),
-            "roll_result": total_roll,
+            "base_roll": base_roll,
+            "modifier": modifier,
+            "final_total": final_total,
             "dc": dc,
             "success": success,
             "original_action": original_action,
             "player_name": player_name,
-            "is_dice_check_result": True  # ✅ Флаг для фронтенда
+            "skill_display": skill_display,
+            "is_dice_check_result": True
         })
 
         await manager.broadcast_to_game(check_result_msg.to_json(), game_id)
-        logger.info(f"Dice check result processed for {player_name}: {'SUCCESS' if success else 'FAILURE'} ({total_roll} vs DC {dc})")
+        logger.info(f"Dice check result for {player_name}: {skill_display} {base_roll}+{modifier}={final_total} vs DC{dc} = {'SUCCESS' if success else 'FAILURE'}")
 
     except Exception as e:
         logger.error(f"Error processing dice check result: {e}", exc_info=True)
@@ -733,31 +843,74 @@ async def send_fallback_ai_response(game_id: str, player_action: str, player_nam
         logger.error(f"Failed to send fallback AI response: {e}")
 
 async def handle_dice_roll(websocket: WebSocket, game_id: str, user_id: str, user: User, data: Dict[str, Any], db: AsyncSession):
-    """Обработка броска костей"""
+    """Улучшенная обработка броска костей с автоматическими модификаторами"""
     notation = data.get("notation", "").strip()
     if not notation:
         return
 
     try:
-        # Выполняем бросок
-        result = dice_service.roll_from_notation(notation)
+        from app.services.dice_service import dice_service
+
+        # Проверяем, есть ли ожидающая проверка для добавления модификатора
+        pending_check = await get_pending_roll_check(game_id, user.username)
+
+        if pending_check and notation == "1d20":
+            # ✅ Для проверок навыков бросаем только d20, модификатор добавим потом
+            dice_result = dice_service.roll_from_notation("1d20")
+        else:
+            # Для обычных бросков используем полную нотацию
+            dice_result = dice_service.roll_from_notation(notation)
+
+        # Преобразуем DiceResult в dict для JSON
+        result_dict = {
+            "notation": notation,
+            "individual_rolls": dice_result.individual_rolls,
+            "modifiers": dice_result.modifiers,
+            "total": dice_result.total,  # Для проверок это будет только d20
+            "is_critical": dice_result.is_critical,
+            "is_advantage": dice_result.is_advantage,
+            "is_disadvantage": dice_result.is_disadvantage,
+            "details": str(dice_result)
+        }
 
         # Создаем сообщение о броске
-        dice_msg = WebSocketMessage("dice_roll", {
-            "notation": notation,
-            "result": result,
-            "player_id": user_id,
-            "player_name": user.username,
-            "purpose": data.get("purpose", ""),
-            "timestamp": datetime.utcnow().isoformat()
-        })
+        if pending_check:
+            # Для проверок показываем только базовый бросок
+            dice_msg = WebSocketMessage("dice_roll", {
+                "notation": notation,
+                "result": result_dict,
+                "player_id": user_id,
+                "player_name": user.username,
+                "purpose": f"Проверка {pending_check.get('skill_display', 'навыка')}",
+                "timestamp": datetime.utcnow().isoformat(),
+                "is_skill_check": True
+            })
+        else:
+            # Обычный бросок
+            dice_msg = WebSocketMessage("dice_roll", {
+                "notation": notation,
+                "result": result_dict,
+                "player_id": user_id,
+                "player_name": user.username,
+                "purpose": data.get("purpose", ""),
+                "timestamp": datetime.utcnow().isoformat(),
+                "is_skill_check": False
+            })
 
         # Рассылаем всем игрокам
         await manager.broadcast_to_game(dice_msg.to_json(), game_id)
 
+        # Обрабатываем результат проверки если есть ожидающая
+        if pending_check:
+            logger.info(f"Processing pending dice check for {user.username}")
+            await process_dice_check_result(game_id, user.username, result_dict, pending_check)
+            await clear_pending_roll_check(game_id, user.username)
+        else:
+            logger.info(f"Regular dice roll by {user.username}: {notation}")
+
     except Exception as e:
-        logger.error(f"Error rolling dice: {e}")
-        error_msg = WebSocketMessage("error", {"message": "Failed to roll dice"})
+        logger.error(f"Error rolling dice: {e}", exc_info=True)
+        error_msg = WebSocketMessage("error", {"message": f"Failed to roll dice: {str(e)}"})
         await websocket.send_text(error_msg.to_json())
 
 

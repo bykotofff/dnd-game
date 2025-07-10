@@ -302,29 +302,72 @@ class AIService:
             game_context: Dict[str, Any]
     ) -> Optional[str]:
         """
-        Генерировать ответ ИИ на основе результата броска кубиков
+        Генерировать ответ ИИ на результат проверки кубиками (улучшенная версия)
         """
         try:
-            total_roll = roll_result.get('total', 0)
-            success = total_roll >= dc
+            base_roll = roll_result.get('base_roll', roll_result.get('total', 0))
+            modifier = roll_result.get('modifier', 0)
+            final_total = roll_result.get('total', base_roll + modifier)
+            success = roll_result.get('success', final_total >= dc)
+            skill = roll_result.get('skill', 'навык')
+
+            # Определяем степень успеха/неудачи для более детального описания
+            margin = abs(final_total - dc)
+
+            if base_roll == 20:
+                outcome_type = "критический_успех"
+            elif base_roll == 1:
+                outcome_type = "критический_провал"
+            elif success:
+                if margin >= 10:
+                    outcome_type = "превосходный_успех"
+                elif margin >= 5:
+                    outcome_type = "хороший_успех"
+                else:
+                    outcome_type = "обычный_успех"
+            else:
+                if margin >= 10:
+                    outcome_type = "серьезная_неудача"
+                elif margin >= 5:
+                    outcome_type = "обычная_неудача"
+                else:
+                    outcome_type = "едва_не_удалось"
+
+            # Формируем модификатор как строку для отображения
+            mod_display = f"+{modifier}" if modifier > 0 else str(modifier) if modifier < 0 else ""
+            roll_display = f"[{base_roll}{mod_display} = {final_total}]"
 
             prompt = f"""
-Игрок {character_name} совершил действие: {action}
+РЕЗУЛЬТАТ ПРОВЕРКИ В D&D:
 
-Результат броска: {total_roll} (DC: {dc})
-Результат: {'УСПЕХ' if success else 'НЕУДАЧА'}
-Детали броска: {roll_result.get('details', 'Нет данных')}
+Персонаж: {character_name}
+Действие: {action}
+Проверка: {skill}
+Бросок: {base_roll} + {modifier} = {final_total}
+Результат: {outcome_type.replace('_', ' ').title()}
 
-Текущая ситуация: {game_context.get('current_scene', 'Неизвестная локация')}
+Контекст: {game_context.get('current_scene', 'Игровая сцена')}
 
-Опиши результат ярко и атмосферно. 
-Покажи КАК действие удается или не удается. 
-Добавь последствия и спроси что игроки делают дальше.
+Опиши результат этой проверки ярко и кинематографично. 
 
-ВАЖНО: Основывайся ТОЧНО на результате броска. Не игнорируй кости!
+СТИЛЬ ОТВЕТА:
+- Начни с краткого описания результата броска: "{roll_display}"
+- Опиши КАК именно действие удается или не удается
+- Сделай повествование атмосферным и захватывающим
+- Покажи последствия действия
+- Закончи вопросом "Что вы делаете?"
+
+ПРИМЕРЫ ХОРОШИХ ОТВЕТОВ:
+- Критический успех: "Результат блестящий! Вы выполняете действие мастерски..."
+- Обычный успех: "Вам удается справиться с задачей..."
+- Едва не удалось: "Кажется, что вот-вот не получится, но..."
+- Неудача: "Несмотря на усилия, что-то идет не так..."
+- Критический провал: "Все идет наперекосяк самым неожиданным образом..."
+
+НЕ раскрывай конкретные цифры DC или точные значения сложности!
 """
 
-            system_prompt = self._get_dm_system_prompt()
+            system_prompt = self._get_dice_result_system_prompt()
 
             response = await self.generate_response(
                 prompt=prompt,
@@ -338,42 +381,40 @@ class AIService:
             logger.error(f"Error generating dice result response: {e}")
             return None
 
-    async def generate_world_description(
-            self,
-            location_name: str,
-            location_type: str = "generic",
-            atmosphere: str = "neutral",
-            details: Optional[str] = None
-    ) -> Optional[str]:
-        """
-        Генерировать описание локации
-        """
-        try:
-            prompt = f"""
-Создай яркое описание локации для D&D игры:
+    def _get_dice_result_system_prompt(self) -> str:
+        """Системный промпт для ответов на результаты бросков"""
+        return """Ты - опытный Данжеон Мастер в D&D 5e. Ты интерпретируешь результаты бросков костей и создаешь живое повествование.
 
-Название: {location_name}
-Тип локации: {location_type}
-Атмосфера: {atmosphere}
-Дополнительные детали: {details or 'Нет'}
+ПРИНЦИПЫ ХОРОШЕГО МАСТЕРСТВА:
+- Результат броска священен - не игнорируй кости
+- Критические успехи (20) должны быть впечатляющими
+- Критические провалы (1) должны быть интересными, не просто наказанием
+- Даже неудачи должны продвигать историю вперед
+- Создавай яркие, кинематографичные описания
 
-Опиши: внешний вид, звуки, запахи, освещение, интересные детали. 
-Сделай описание атмосферным и погружающим. Длина: 2-3 предложения.
-"""
+СТИЛЬ ПОВЕСТВОВАНИЯ:
+- Пиши от третьего лица ("вы", "ваш персонаж")
+- Используй активные конструкции
+- Создавай напряжение и атмосферу
+- Показывай, не рассказывай
+- Задействуй все чувства (зрение, слух, осязание)
 
-            system_prompt = """Ты - опытный Данжеон Мастер в D&D. Создавай живые, атмосферные описания локаций, которые помогают игрокам погрузиться в мир."""
+СТРУКТУРА ОТВЕТА:
+1. Результат броска в квадратных скобках
+2. Описание того, как происходит действие
+3. Последствия и детали
+4. Вопрос "Что вы делаете?"
 
-            response = await self.generate_response(
-                prompt=prompt,
-                system_prompt=system_prompt,
-                temperature=0.8
-            )
+ПРИМЕРЫ ОТЛИЧНЫХ ОПИСАНИЙ:
+✅ "Ваши пальцы находят идеальные зацепки на каменной стене"
+✅ "Тень от облака в нужный момент скрывает вашу фигуру"
+✅ "Ваши слова звучат так убедительно, что даже вы сами им верите"
 
-            return response
+❌ "Вы прошли проверку ловкости"
+❌ "Бросок успешный"
+❌ "Получается скрыться"
 
-        except Exception as e:
-            logger.error(f"Error generating world description: {e}")
-            return None
+Отвечай ТОЛЬКО на русском языке!"""
 
     async def summarize_long_context(self, long_context: str) -> str:
         """Сократить длинный контекст для ИИ"""

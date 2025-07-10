@@ -297,10 +297,11 @@ export const useGameStore = create<GameState>()(
                     get().addMessage(aiMessage);
                 });
 
-                // ✅ НОВЫЙ: Обработчик запросов на бросок кубиков
+                // ✅ УЛУЧШЕННЫЙ: Обработчик запросов на бросок кубиков
                 websocketService.on('roll_request', (data: any) => {
                     console.log('Received roll request:', data);
 
+                    // Создаем более простое сообщение для чата
                     const rollRequestMessage: GameMessage = {
                         id: `roll-request-${Date.now()}`,
                         type: 'system' as const,
@@ -311,23 +312,31 @@ export const useGameStore = create<GameState>()(
                             requires_dice_roll: data.requires_dice_roll,
                             roll_type: data.roll_type,
                             ability_or_skill: data.ability_or_skill,
-                            dc: data.dc,
+                            skill_display: data.skill_display,
+                            dice_notation: data.dice_notation,
+                            modifier: data.modifier,
                             advantage: data.advantage,
                             disadvantage: data.disadvantage,
                             original_action: data.original_action,
-                            requesting_player: data.requesting_player
+                            requesting_player: data.requesting_player,
+                            auto_modifier: data.auto_modifier
                         }
                     };
 
                     get().addMessage(rollRequestMessage);
+
+                    // Автоматически открываем роллер кубиков
                     set({ showDiceRoller: true });
-                    console.log(`Требуется проверка: ${data.ability_or_skill} (DC ${data.dc})`);
+
+                    // Показываем уведомление только с названием навыка
+                    console.log(`Требуется проверка: ${data.skill_display}`);
                 });
 
-                // ✅ НОВЫЙ: Обработчик результатов проверок кубиков
+                // ✅ УЛУЧШЕННЫЙ: Обработчик результатов проверок кубиков
                 websocketService.on('dice_check_result', (data: any) => {
                     console.log('Received dice check result:', data);
 
+                    // Показываем результат с детальной информацией о броске
                     const checkResultMessage: GameMessage = {
                         id: `check-result-${Date.now()}`,
                         type: 'dm' as const,
@@ -336,19 +345,69 @@ export const useGameStore = create<GameState>()(
                         timestamp: new Date(data.timestamp || Date.now()),
                         metadata: {
                             is_dice_check_result: data.is_dice_check_result,
-                            roll_result: data.roll_result,
-                            dc: data.dc,
+                            base_roll: data.base_roll,
+                            modifier: data.modifier,
+                            final_total: data.final_total,
                             success: data.success,
                             original_action: data.original_action,
-                            player_name: data.player_name
+                            player_name: data.player_name,
+                            skill_display: data.skill_display
                         }
                     };
 
                     get().addMessage(checkResultMessage);
 
+                    // Показываем детальный результат в консоли
                     const successIcon = data.success ? '🎯' : '❌';
                     const resultText = data.success ? 'Успех!' : 'Неудача';
-                    console.log(`${successIcon} ${resultText} (${data.roll_result}/${data.dc})`);
+                    const rollDetails = `${data.base_roll}+${data.modifier}=${data.final_total}`;
+                    console.log(`${successIcon} ${resultText} ${data.skill_display}: ${rollDetails}`);
+                });
+
+                // ✅ УЛУЧШЕННЫЙ: Обработчик обычных бросков кубиков
+                websocketService.on('dice_roll', (data: any) => {
+                    console.log('Received dice roll:', data);
+
+                    // Различаем проверки навыков и обычные броски
+                    let content: string;
+                    if (data.is_skill_check) {
+                        // Для проверок навыков показываем только базовый результат d20
+                        content = `🎲 **${data.player_name}** бросил d20: **${data.result.total}** *(${data.purpose})*`;
+                    } else {
+                        // Для обычных бросков показываем полный результат
+                        content = `🎲 **${data.player_name}** бросил ${data.notation}: **${data.result.total}**`;
+                        if (data.result.details) {
+                            content += ` *(${data.result.details})*`;
+                        }
+                    }
+
+                    const diceMessage: GameMessage = {
+                        id: `dice-${Date.now()}`,
+                        type: 'dice' as const,
+                        author: data.player_name,
+                        content: content,
+                        timestamp: new Date(data.timestamp || Date.now()),
+                        metadata: {
+                            notation: data.notation,
+                            result: data.result,
+                            player_id: data.player_id,
+                            purpose: data.purpose,
+                            is_skill_check: data.is_skill_check
+                        }
+                    };
+
+                    get().addMessage(diceMessage);
+
+                    // Сохраняем последний бросок в стор
+                    set({
+                        lastDiceRoll: {
+                            notation: data.notation,
+                            result: data.result,
+                            timestamp: data.timestamp,
+                            player: data.player_name,
+                            is_skill_check: data.is_skill_check
+                        }
+                    });
                 });
 
             } catch (error: any) {
