@@ -22,24 +22,36 @@ interface GameChatProps {
 }
 
 const GameChat: React.FC<GameChatProps> = ({ gameId, className = '' }) => {
-    // Получаем состояние из store
+    // ✅ ИСПРАВЛЕНИЕ: Используем специальный селектор для чата
     const {
-        messages,
+        chatMessages,
         chatInput,
         isConnected,
         sendMessage,
         setChatInput,
         setTyping
-    } = useGameStore();
+    } = useGameStore((state) => ({
+        chatMessages: state.chatMessages,
+        chatInput: state.chatInput,
+        isConnected: state.isConnected,
+        sendMessage: state.sendMessage,
+        setChatInput: state.setChatInput,
+        setTyping: state.setTyping
+    }));
 
     const [showEmojis, setShowEmojis] = useState(false);
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLInputElement>(null);
 
-    // Автопрокрутка к новым сообщениям
+    // ✅ ОТЛАДКА: Логируем состояние сообщений
+    useEffect(() => {
+        console.log('🔍 GameChat: chatMessages updated:', chatMessages.length, chatMessages);
+    }, [chatMessages]);
+
+    // ✅ ИСПРАВЛЕНИЕ: Автопрокрутка к новым сообщениям теперь использует chatMessages
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [messages]);
+    }, [chatMessages]); // Изменено с messages на chatMessages
 
     // Фокус на input при подключении
     useEffect(() => {
@@ -154,8 +166,10 @@ const GameChat: React.FC<GameChatProps> = ({ gameId, className = '' }) => {
                 return 'bg-gray-700/50 border-gray-600/50 text-gray-300';
             case 'action':
                 return 'bg-yellow-900/30 border-yellow-700/50 text-yellow-200';
+            case 'chat': // ✅ Добавляем стиль для обычных чат сообщений
+                return 'bg-gray-800/70 border-gray-600/50 text-white';
             default:
-                return 'bg-gray-800/70 border-gray-600/50 text-white'; // ИСПРАВЛЕНИЕ: убрана прозрачность
+                return 'bg-gray-800/70 border-gray-600/50 text-white';
         }
     };
 
@@ -172,6 +186,8 @@ const GameChat: React.FC<GameChatProps> = ({ gameId, className = '' }) => {
                 return <ChatBubbleLeftIcon className="w-4 h-4 text-gray-400" />;
             case 'action':
                 return <SparklesIcon className="w-4 h-4 text-yellow-400" />;
+            case 'chat': // ✅ Добавляем иконку для обычных чат сообщений
+                return <UserIcon className="w-4 h-4 text-blue-400" />;
             default:
                 return <UserIcon className="w-4 h-4 text-gray-400" />;
         }
@@ -195,137 +211,106 @@ const GameChat: React.FC<GameChatProps> = ({ gameId, className = '' }) => {
             <CardContent className="flex-1 flex flex-col p-0">
                 {/* Messages area */}
                 <div className="flex-1 overflow-y-auto p-3 space-y-3 min-h-0">
+                    {/* ✅ ОТЛАДКА: Показываем количество сообщений */}
+                    {chatMessages.length === 0 && (
+                        <div className="text-center text-gray-500 py-8">
+                            <ChatBubbleLeftIcon className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                            <p>Пока сообщений нет...</p>
+                            <p className="text-sm mt-2">Напишите что-нибудь в чат!</p>
+                        </div>
+                    )}
+
                     <AnimatePresence initial={false}>
-                        {messages.map((message, index) => (
+                        {/* ✅ ИСПРАВЛЕНИЕ: Используем chatMessages вместо messages */}
+                        {chatMessages.map((message, index) => (
                             <motion.div
                                 key={`${message.id}-${index}`}
                                 initial={{ opacity: 0, y: 20 }}
                                 animate={{ opacity: 1, y: 0 }}
                                 exit={{ opacity: 0, y: -20 }}
-                                className={`rounded-lg p-3 border ${getMessageStyle(message)}`} // ИСПРАВЛЕНИЕ: убрана лишняя прозрачность
+                                className={`rounded-lg p-3 border ${getMessageStyle(message)}`}
                             >
                                 <div className="flex items-start space-x-2">
                                     {getMessageIcon(message)}
                                     <div className="flex-1 min-w-0">
                                         <div className="flex items-center space-x-2 mb-1">
                                             <span className="font-medium text-sm">
-                                                {message.sender}
+                                                {/* ✅ ИСПРАВЛЕНИЕ: Используем author вместо sender */}
+                                                {message.author || 'Unknown'}
                                             </span>
                                             <span className="text-xs opacity-60">
                                                 {new Date(message.timestamp).toLocaleTimeString()}
                                             </span>
-                                            {message.type === 'ooc' && (
-                                                <span className="text-xs bg-gray-600 px-1 rounded text-gray-300">
-                                                    OOC
-                                                </span>
+                                            {/* ✅ ИСПРАВЛЕНИЕ: Проверяем metadata для OOC */}
+                                            {message.metadata?.is_ooc && (
+                                                <span className="text-xs bg-gray-600 px-1 rounded">OOC</span>
                                             )}
                                         </div>
-                                        <div className="text-sm break-words">
+                                        <div className="text-sm leading-relaxed">
                                             {message.content}
                                         </div>
-                                        {message.dice_roll && (
-                                            <div className="mt-2 p-2 bg-black/20 rounded text-xs">
-                                                🎲 {message.dice_roll.notation}:
-                                                <span className="font-bold ml-1">
-                                                    {message.dice_roll.total}
-                                                </span>
-                                                {message.dice_roll.individual_rolls?.length > 1 && (
-                                                    <span className="ml-1 opacity-60">
-                                                        ({message.dice_roll.individual_rolls.join(', ')})
-                                                    </span>
-                                                )}
-                                            </div>
-                                        )}
                                     </div>
                                 </div>
                             </motion.div>
                         ))}
                     </AnimatePresence>
-
-                    {/* Placeholder when no messages */}
-                    {messages.length === 0 && (
-                        <div className="text-center text-gray-500 py-8">
-                            <ChatBubbleLeftIcon className="w-12 h-12 mx-auto mb-3 opacity-50" />
-                            <p>Сообщений пока нет</p>
-                            <p className="text-sm mt-1">Начните общение!</p>
-                        </div>
-                    )}
-
                     <div ref={messagesEndRef} />
                 </div>
 
-                {/* Emoji picker */}
-                <AnimatePresence>
+                {/* Input area */}
+                <div className="border-t border-gray-700 p-3">
+                    <form onSubmit={handleSubmit} className="flex items-center space-x-2">
+                        <div className="relative flex-1">
+                            <Input
+                                ref={inputRef}
+                                type="text"
+                                value={chatInput}
+                                onChange={handleInputChange}
+                                placeholder={isConnected ? "Напишите сообщение..." : "Подключение..."}
+                                disabled={!isConnected}
+                                className="pr-10 bg-gray-800 border-gray-600 text-white placeholder-gray-400"
+                            />
+                            <Button
+                                type="button"
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => setShowEmojis(!showEmojis)}
+                                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 h-6 w-6"
+                            >
+                                <FaceSmileIcon className="w-4 h-4" />
+                            </Button>
+                        </div>
+                        <Button
+                            type="submit"
+                            size="sm"
+                            disabled={!isConnected || !chatInput.trim()}
+                            className="bg-purple-600 hover:bg-purple-700 text-white"
+                        >
+                            <PaperAirplaneIcon className="w-4 h-4" />
+                        </Button>
+                    </form>
+
+                    {/* Emoji picker */}
                     {showEmojis && (
                         <motion.div
-                            initial={{ opacity: 0, height: 0 }}
-                            animate={{ opacity: 1, height: 'auto' }}
-                            exit={{ opacity: 0, height: 0 }}
-                            className="border-t border-gray-700 p-3"
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: 10 }}
+                            className="mt-2 p-2 bg-gray-800 border border-gray-600 rounded-lg"
                         >
-                            <div className="grid grid-cols-8 gap-2">
-                                {popularEmojis.map((emoji, index) => (
+                            <div className="grid grid-cols-8 gap-1">
+                                {popularEmojis.map((emoji) => (
                                     <button
-                                        key={index}
+                                        key={emoji}
+                                        type="button"
                                         onClick={() => handleEmojiSelect(emoji)}
-                                        className="text-lg hover:bg-gray-700 rounded p-1 transition-colors"
+                                        className="p-1 hover:bg-gray-700 rounded text-lg"
                                     >
                                         {emoji}
                                     </button>
                                 ))}
                             </div>
                         </motion.div>
-                    )}
-                </AnimatePresence>
-
-                {/* Input Area */}
-                <div className="border-t border-gray-700 p-3">
-                    <form onSubmit={handleSubmit} className="flex items-center gap-2">
-                        <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => setShowEmojis(!showEmojis)}
-                            className="h-8 w-8 p-0 text-gray-400 hover:text-white"
-                        >
-                            <FaceSmileIcon className="h-4 w-4" />
-                        </Button>
-
-                        <Input
-                            ref={inputRef}
-                            type="text"
-                            placeholder="Введите сообщение... (используйте /help для команд)"
-                            value={chatInput}
-                            onChange={handleInputChange}
-                            className="flex-1 bg-gray-700 border-gray-600 text-white placeholder-gray-400 focus:border-blue-500 focus:ring-blue-500"
-                            autoComplete="off"
-                            disabled={!isConnected}
-                        />
-
-                        <Button
-                            type="submit"
-                            disabled={!chatInput.trim() || !isConnected}
-                            size="sm"
-                            className="bg-blue-600 hover:bg-blue-700 text-white"
-                        >
-                            <PaperAirplaneIcon className="h-4 w-4" />
-                        </Button>
-                    </form>
-
-                    {/* Input hints */}
-                    <div className="text-xs text-gray-500 mt-1">
-                        {chatInput.startsWith('/') ? (
-                            <span>💡 Режим команды - введите /help для доступных команд</span>
-                        ) : (
-                            <span>💬 Enter для отправки • /roll для костей • /ooc для OOC</span>
-                        )}
-                    </div>
-
-                    {/* Connection status */}
-                    {!isConnected && (
-                        <div className="mt-2 text-xs text-red-400 text-center">
-                            ⚠️ Не подключен к игре
-                        </div>
                     )}
                 </div>
             </CardContent>

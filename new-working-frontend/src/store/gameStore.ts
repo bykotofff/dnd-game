@@ -629,10 +629,25 @@ export const useGameChat = () => {
     const store = useGameStore();
     return {
         messages: store.messages,
+        chatMessages: store.chatMessages, // ✅ Добавляем chatMessages
         chatInput: store.chatInput,
         isTyping: store.isTyping,
+        isConnected: store.isConnected, // ✅ Добавляем состояние подключения
         sendMessage: store.sendMessage,
         sendAction: store.sendAction,
+        setChatInput: store.setChatInput,
+        setTyping: store.setTyping,
+    };
+};
+
+// ✅ НОВЫЙ: Специальный селектор только для чата
+export const useChatMessages = () => {
+    const store = useGameStore();
+    return {
+        chatMessages: store.chatMessages,
+        chatInput: store.chatInput,
+        isConnected: store.isConnected,
+        sendMessage: store.sendMessage,
         setChatInput: store.setChatInput,
         setTyping: store.setTyping,
     };
@@ -682,6 +697,7 @@ export const useGameData = () => {
         isConnecting: store.isConnecting,
         connectionError: store.connectionError,
         messages: store.messages,
+        chatMessages: store.chatMessages, // ✅ Добавляем chatMessages
         playersOnline: store.playersOnline,
         activeCharacters: store.activeCharacters,
         currentScene: store.currentScene,
