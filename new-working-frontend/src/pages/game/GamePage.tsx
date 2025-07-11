@@ -298,6 +298,7 @@ const GamePage = () => {
         isConnecting,
         connectionError,
         messages,
+        chatMessages,
         currentScene,
         players,
         playersOnline,
@@ -337,6 +338,7 @@ const GamePage = () => {
 
     // Используем локальные состояния как fallback
     const actualMessages = messages?.length > 0 ? messages : localMessages;
+    const actualChatMessages = chatMessages?.length > 0 ? chatMessages : [];
     const actualPlayers = players?.length > 0 ? players : (playersOnline?.length > 0 ? playersOnline : localPlayers);
     const actualCurrentScene = currentScene || generatedScene;
 
@@ -1125,11 +1127,11 @@ const GamePage = () => {
 
                                 {/* Chat Messages */}
                                 <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-gray-50 dark:bg-gray-900">
-                                    {actualMessages.filter(msg => msg.type === 'chat' || msg.type === 'ooc').map((message, index) => (
+                                    {actualChatMessages.map((message, index) => (
                                         <div key={message.id || index} className="text-sm">
                                             <div className="flex items-center space-x-2 mb-1">
                                                 <span className="font-medium text-gray-900 dark:text-white">
-                                                    {message.author}:
+                                                     {message.sender}:
                                                 </span>
                                                 <span className="text-xs text-gray-500 dark:text-gray-400">
                                                     {new Date(message.timestamp).toLocaleTimeString('ru-RU', {
