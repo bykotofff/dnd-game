@@ -193,13 +193,9 @@ export const useGameStore = create<GameState>()(
                     const chatMessage: GameMessage = {
                         id: `chat-${Date.now()}`,
                         type: 'chat' as const,
-                        author: data.sender_name || 'Unknown',
+                        sender: data.sender_name || 'Unknown',
                         content: data.content,
-                        timestamp: new Date(data.timestamp || Date.now()),
-                        metadata: {
-                            is_ooc: data.is_ooc,
-                            sender_id: data.sender_id
-                        }
+                        timestamp: data.timestamp,
                     };
 
                     // ✅ Добавляем ТОЛЬКО в чат
@@ -506,6 +502,7 @@ export const useGameStore = create<GameState>()(
 
         // ✅ НОВЫЙ МЕТОД: Добавление сообщения
         addMessage: (message: GameMessage) => {
+            console.log('📝 Adding message to store:', message);
             set(state => ({
                 messages: [...state.messages, message].slice(-50)
             }));
@@ -513,6 +510,7 @@ export const useGameStore = create<GameState>()(
 
         // ✅ НОВЫЙ addChatMessage - только для чата
         addChatMessage: (message: GameMessage) => {
+            console.log('💬 Adding chat message to store:', message);
             set((state) => ({
                 chatMessages: [...state.chatMessages, message].slice(-100)
             }));

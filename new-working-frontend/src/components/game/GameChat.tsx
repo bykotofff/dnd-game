@@ -22,7 +22,7 @@ interface GameChatProps {
 }
 
 const GameChat: React.FC<GameChatProps> = ({ gameId, className = '' }) => {
-    // ✅ ИСПРАВЛЕНИЕ: Используем специальный селектор для чата
+    // ✅ ИСПРАВЛЕНИЕ: Используем chatMessages вместо messages
     const {
         chatMessages,
         chatInput,
@@ -30,28 +30,16 @@ const GameChat: React.FC<GameChatProps> = ({ gameId, className = '' }) => {
         sendMessage,
         setChatInput,
         setTyping
-    } = useGameStore((state) => ({
-        chatMessages: state.chatMessages,
-        chatInput: state.chatInput,
-        isConnected: state.isConnected,
-        sendMessage: state.sendMessage,
-        setChatInput: state.setChatInput,
-        setTyping: state.setTyping
-    }));
+    } = useGameStore();
 
     const [showEmojis, setShowEmojis] = useState(false);
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLInputElement>(null);
 
-    // ✅ ОТЛАДКА: Логируем состояние сообщений
-    useEffect(() => {
-        console.log('🔍 GameChat: chatMessages updated:', chatMessages.length, chatMessages);
-    }, [chatMessages]);
-
-    // ✅ ИСПРАВЛЕНИЕ: Автопрокрутка к новым сообщениям теперь использует chatMessages
+    // Автопрокрутка к новым сообщениям
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [chatMessages]); // Изменено с messages на chatMessages
+    }, [chatMessages]);
 
     // Фокус на input при подключении
     useEffect(() => {
@@ -166,7 +154,7 @@ const GameChat: React.FC<GameChatProps> = ({ gameId, className = '' }) => {
                 return 'bg-gray-700/50 border-gray-600/50 text-gray-300';
             case 'action':
                 return 'bg-yellow-900/30 border-yellow-700/50 text-yellow-200';
-            case 'chat': // ✅ Добавляем стиль для обычных чат сообщений
+            case 'chat':
                 return 'bg-gray-800/70 border-gray-600/50 text-white';
             default:
                 return 'bg-gray-800/70 border-gray-600/50 text-white';
@@ -186,7 +174,7 @@ const GameChat: React.FC<GameChatProps> = ({ gameId, className = '' }) => {
                 return <ChatBubbleLeftIcon className="w-4 h-4 text-gray-400" />;
             case 'action':
                 return <SparklesIcon className="w-4 h-4 text-yellow-400" />;
-            case 'chat': // ✅ Добавляем иконку для обычных чат сообщений
+            case 'chat':
                 return <UserIcon className="w-4 h-4 text-blue-400" />;
             default:
                 return <UserIcon className="w-4 h-4 text-gray-400" />;
@@ -211,7 +199,7 @@ const GameChat: React.FC<GameChatProps> = ({ gameId, className = '' }) => {
             <CardContent className="flex-1 flex flex-col p-0">
                 {/* Messages area */}
                 <div className="flex-1 overflow-y-auto p-3 space-y-3 min-h-0">
-                    {/* ✅ ОТЛАДКА: Показываем количество сообщений */}
+                    {/* Показываем сообщение, если чат пустой */}
                     {chatMessages.length === 0 && (
                         <div className="text-center text-gray-500 py-8">
                             <ChatBubbleLeftIcon className="w-12 h-12 mx-auto mb-4 opacity-50" />
@@ -221,7 +209,7 @@ const GameChat: React.FC<GameChatProps> = ({ gameId, className = '' }) => {
                     )}
 
                     <AnimatePresence initial={false}>
-                        {/* ✅ ИСПРАВЛЕНИЕ: Используем chatMessages вместо messages */}
+                        {/* ✅ ИСПРАВЛЕНИЕ: Используем chatMessages и правильное поле sender */}
                         {chatMessages.map((message, index) => (
                             <motion.div
                                 key={`${message.id}-${index}`}
@@ -235,14 +223,15 @@ const GameChat: React.FC<GameChatProps> = ({ gameId, className = '' }) => {
                                     <div className="flex-1 min-w-0">
                                         <div className="flex items-center space-x-2 mb-1">
                                             <span className="font-medium text-sm">
-                                                {/* ✅ ИСПРАВЛЕНИЕ: Используем author вместо sender */}
-                                                {message.author || 'Unknown'}
+                                                {/* ✅ ИСПРАВЛЕНИЕ: Используем sender вместо author */}
+                                                {message.sender || 'Unknown'}
                                             </span>
                                             <span className="text-xs opacity-60">
+                                                {/* ✅ ИСПРАВЛЕНИЕ: Правильно обрабатываем timestamp */}
                                                 {new Date(message.timestamp).toLocaleTimeString()}
                                             </span>
-                                            {/* ✅ ИСПРАВЛЕНИЕ: Проверяем metadata для OOC */}
-                                            {message.metadata?.is_ooc && (
+                                            {/* ✅ ИСПРАВЛЕНИЕ: Проверяем тип сообщения для OOC */}
+                                            {message.type === 'ooc' && (
                                                 <span className="text-xs bg-gray-600 px-1 rounded">OOC</span>
                                             )}
                                         </div>
