@@ -14,6 +14,7 @@ interface GameState {
 
     // Game data
     messages: GameMessage[];
+    chatMessages: GameMessage[];
     playersOnline: GamePlayer[];
     activeCharacters: Character[];
     currentScene: string | null;
@@ -46,6 +47,7 @@ interface GameState {
 
     // ✅ НОВЫЙ МЕТОД: Добавление сообщения
     addMessage: (message: GameMessage) => void;
+    addChatMessage: (message: GameMessage) => void;
 
     // ✅ НОВЫЕ МЕТОДЫ для инициативы и управления игрой
     rollInitiative: (characterId: string) => Promise<void>;
@@ -67,6 +69,7 @@ export const useGameStore = create<GameState>()(
         isConnecting: false,
         connectionError: null,
         messages: [],
+        chatMessages: [],
         playersOnline: [],
         activeCharacters: [],
         currentScene: null,
@@ -184,16 +187,23 @@ export const useGameStore = create<GameState>()(
                 });
 
                 // ✅ НОВЫЙ: Обработчик чат сообщений
-                websocketService.on('chat_message', (data) => {
+                websocketService.on('chat_message', (data: any) => {
                     console.log('Received chat message:', data);
-                    get().addMessage({
+
+                    const chatMessage: GameMessage = {
                         id: `chat-${Date.now()}`,
+                        type: 'chat' as const,
+                        author: data.sender_name || 'Unknown',
                         content: data.content,
-                        message_type: 'chat',
-                        author: data.sender_name,
-                        timestamp: data.timestamp,
-                        is_ooc: data.is_ooc || false,
-                    });
+                        timestamp: new Date(data.timestamp || Date.now()),
+                        metadata: {
+                            is_ooc: data.is_ooc,
+                            sender_id: data.sender_id
+                        }
+                    };
+
+                    // ✅ Добавляем ТОЛЬКО в чат
+                    get().addChatMessage(chatMessage);
                 });
 
                 // ✅ НОВЫЙ: Обработчик действий игрока
@@ -301,12 +311,12 @@ export const useGameStore = create<GameState>()(
                 websocketService.on('roll_request', (data: any) => {
                     console.log('Received roll request:', data);
 
-                    // Создаем более простое сообщение для чата
+                    // Создаем сообщение с четкими инструкциями
                     const rollRequestMessage: GameMessage = {
                         id: `roll-request-${Date.now()}`,
                         type: 'system' as const,
                         author: data.sender_name || 'ИИ Мастер',
-                        content: data.message,
+                        content: data.message, // Уже содержит инструкцию "бросьте d20!"
                         timestamp: new Date(data.timestamp || Date.now()),
                         metadata: {
                             requires_dice_roll: data.requires_dice_roll,
@@ -314,6 +324,7 @@ export const useGameStore = create<GameState>()(
                             ability_or_skill: data.ability_or_skill,
                             skill_display: data.skill_display,
                             dice_notation: data.dice_notation,
+                            dice_instruction: data.dice_instruction, // ✅ НОВОЕ: четкая инструкция
                             modifier: data.modifier,
                             advantage: data.advantage,
                             disadvantage: data.disadvantage,
@@ -328,8 +339,8 @@ export const useGameStore = create<GameState>()(
                     // Автоматически открываем роллер кубиков
                     set({ showDiceRoller: true });
 
-                    // Показываем уведомление только с названием навыка
-                    console.log(`Требуется проверка: ${data.skill_display}`);
+                    // Показываем уведомление с инструкцией
+                    console.log(`${data.skill_display}: ${data.dice_instruction}`);
                 });
 
                 // ✅ УЛУЧШЕННЫЙ: Обработчик результатов проверок кубиков
@@ -496,7 +507,14 @@ export const useGameStore = create<GameState>()(
         // ✅ НОВЫЙ МЕТОД: Добавление сообщения
         addMessage: (message: GameMessage) => {
             set(state => ({
-                messages: [...state.messages, message]
+                messages: [...state.messages, message].slice(-50)
+            }));
+        },
+
+        // ✅ НОВЫЙ addChatMessage - только для чата
+        addChatMessage: (message: GameMessage) => {
+            set((state) => ({
+                chatMessages: [...state.chatMessages, message].slice(-100)
             }));
         },
 

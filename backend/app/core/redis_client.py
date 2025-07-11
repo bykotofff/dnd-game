@@ -295,7 +295,11 @@ class RedisClient:
         try:
             data = await self.redis.get(key)
             if data:
-                return json.loads(data.decode('utf-8'))
+                # ✅ ИСПРАВЛЕНО: Данные уже декодированы, не нужно decode('utf-8')
+                if isinstance(data, str):
+                    return json.loads(data)
+                else:
+                    return data
             return None
         except Exception as e:
             logger.error(f"Error getting JSON data {key}: {e}")

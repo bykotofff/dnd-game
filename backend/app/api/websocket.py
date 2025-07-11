@@ -452,7 +452,7 @@ async def handle_ai_response_with_dice_check(game_id: str, player_action: str, c
 
 
 async def request_dice_roll(game_id: str, dice_analysis: dict, player_name: str, original_action: str):
-    """Запрос броска кубиков от игрока (улучшенная версия)"""
+    """Запрос броска кубиков от игрока с четкими инструкциями"""
     try:
         roll_type = dice_analysis.get("roll_type", "проверка_навыка")
         ability_or_skill = dice_analysis.get("ability_or_skill", "восприятие")
@@ -462,7 +462,7 @@ async def request_dice_roll(game_id: str, dice_analysis: dict, player_name: str,
         advantage = advantage_disadvantage == "преимущество"
         disadvantage = advantage_disadvantage == "помеха"
 
-        # ✅ УЛУЧШЕНО: Более атмосферное сообщение без раскрытия DC
+        # Переводим навыки на русский
         skill_names = {
             "ловкость": "Ловкость",
             "сила": "Сила",
@@ -494,10 +494,10 @@ async def request_dice_roll(game_id: str, dice_analysis: dict, player_name: str,
         skill_display = skill_names.get(ability_or_skill.lower(), ability_or_skill.title())
 
         # Определяем тип кубика и модификатор
-        dice_notation = "1d20"
-        modifier = get_skill_modifier(ability_or_skill, player_name)  # Получаем модификатор персонажа
+        dice_notation = "1d20"  # Для большинства проверок
+        modifier = get_skill_modifier(ability_or_skill, player_name)
 
-        # Формируем атмосферное сообщение
+        # ✅ УЛУЧШЕНО: Более конкретные инструкции с указанием кубика
         action_descriptions = {
             "скрытность": "осторожно двигается в тенях",
             "восприятие": "внимательно осматривается",
@@ -508,18 +508,23 @@ async def request_dice_roll(game_id: str, dice_analysis: dict, player_name: str,
             "расследование": "ищет улики и подсказки",
             "мудрость": "полагается на житейскую мудрость",
             "интеллект": "задействует свои знания",
-            "ловкость": "полагается на быстроту и ловкость"
+            "ловкость": "полагается на быстроту и ловкость",
+            "сила": "напрягает все свои силы",
+            "телосложение": "полагается на выносливость",
+            "харизма": "использует природное обаяние"
         }
 
         action_desc = action_descriptions.get(ability_or_skill.lower(), f"использует навык {skill_display}")
 
-        # Создаем более естественное сообщение
-        roll_request_msg = f"**{player_name}** {action_desc}. Сделайте проверку **{skill_display}**!"
-
+        # ✅ НОВОЕ: Формируем сообщение с четкими инструкциями по броску
+        dice_instruction = "d20"
         if advantage:
-            roll_request_msg += " *(с преимуществом)*"
+            dice_instruction = "2d20 и возьмите лучший результат"
         elif disadvantage:
-            roll_request_msg += " *(с помехой)*"
+            dice_instruction = "2d20 и возьмите худший результат"
+
+        # Создаем более информативное сообщение
+        roll_request_msg = f"**{player_name}** {action_desc}. Сделайте проверку **{skill_display}** — бросьте **{dice_instruction}**!"
 
         # Подготавливаем данные для сохранения
         check_data = {
@@ -530,11 +535,12 @@ async def request_dice_roll(game_id: str, dice_analysis: dict, player_name: str,
             "disadvantage": disadvantage,
             "original_action": original_action,
             "dice_notation": dice_notation,
+            "dice_instruction": dice_instruction,
             "modifier": modifier,
             "skill_display": skill_display
         }
 
-        # Отправляем запрос броска с инструкциями для игрока
+        # Отправляем запрос броска с четкими инструкциями
         roll_request = WebSocketMessage("roll_request", {
             "message": roll_request_msg,
             "sender_name": "ИИ Мастер",
@@ -543,25 +549,25 @@ async def request_dice_roll(game_id: str, dice_analysis: dict, player_name: str,
             "ability_or_skill": ability_or_skill,
             "skill_display": skill_display,
             "dice_notation": dice_notation,
+            "dice_instruction": dice_instruction,  # ✅ Четкая инструкция что бросать
             "modifier": modifier,
             "advantage": advantage,
             "disadvantage": disadvantage,
             "original_action": original_action,
             "requesting_player": player_name,
             "requires_dice_roll": True,
-            "auto_modifier": True  # ✅ Флаг для автоматического добавления модификатора
+            "auto_modifier": True
         })
 
         await manager.broadcast_to_game(roll_request.to_json(), game_id)
 
-        # ✅ Сохраняем ожидающую проверку в Redis
+        # Сохраняем ожидающую проверку в Redis
         await store_pending_roll_check(game_id, player_name, check_data, original_action)
 
-        logger.info(f"Dice roll requested for {player_name}: {skill_display} check (DC {dc})")
+        logger.info(f"Dice roll requested for {player_name}: {skill_display} check (DC {dc}) - {dice_instruction}")
 
     except Exception as e:
         logger.error(f"Error requesting dice roll: {e}")
-        # В случае ошибки отправляем обычный ответ ИИ
         await send_fallback_ai_response(game_id, original_action, player_name)
 
 def get_skill_modifier(ability_or_skill: str, player_name: str) -> int:
@@ -601,7 +607,39 @@ def get_skill_modifier(ability_or_skill: str, player_name: str) -> int:
 
     return base_modifiers.get(ability_or_skill.lower(), 0)
 
+# Дополните функцию для других типов бросков (не только d20):
+def get_dice_for_action(roll_type: str, ability_or_skill: str) -> tuple[str, str]:
+    """Определить какие кубики нужно бросить для конкретного действия"""
+    # Специальные случаи для разных типов действий
+    special_dice = {
+        # Урон от разных видов оружия
+        "урон_меч": ("1d8", "1d8"),
+        "урон_лук": ("1d6", "1d6"),
+        "урон_топор": ("1d12", "1d12"),
+        "урон_кинжал": ("1d4", "1d4"),
 
+        # Лечение
+        "лечение": ("1d4", "1d4"),
+        "зелье_лечения": ("2d4+2", "2d4+2"),
+
+        # Хиты при повышении уровня
+        "хиты": ("1d8", "1d8"),  # Для большинства классов
+
+        # Инициатива
+        "инициатива": ("1d20", "d20"),
+    }
+
+    # Проверяем специальные случаи
+    key = f"{roll_type}_{ability_or_skill}".lower()
+    if key in special_dice:
+        return special_dice[key]
+
+    # Для большинства проверок используем d20
+    if roll_type in ["проверка_навыка", "проверка_характеристики", "спасбросок", "атака"]:
+        return ("1d20", "d20")
+
+    # По умолчанию d20
+    return ("1d20", "d20")
 
 
 
@@ -796,16 +834,23 @@ async def store_pending_roll_check(game_id: str, player_name: str, check_data: d
             "original_action": original_action,
             "timestamp": datetime.utcnow().isoformat()
         }
-        await redis_client.set_with_expiry(key, data, 300)  # 5 минут
-        logger.info(f"Stored pending roll check for {player_name} in game {game_id}")
+        # ✅ ИСПРАВЛЕНО: Используем правильный метод Redis клиента
+        success = await redis_client.set_with_expiry(key, data, 300)  # 5 минут
+        if success:
+            logger.info(f"Stored pending roll check for {player_name} in game {game_id}")
+        else:
+            logger.error(f"Failed to store pending roll check for {player_name}")
+        return success
     except Exception as e:
         logger.error(f"Error storing pending roll check: {e}")
+        return False
 
 
 async def get_pending_roll_check(game_id: str, player_name: str) -> dict:
     """Получить ожидающую проверку из Redis"""
     try:
         key = f"pending_roll:{game_id}:{player_name}"
+        # ✅ ИСПРАВЛЕНО: Используем исправленный метод get_json
         result = await redis_client.get_json(key)
         logger.info(f"Retrieved pending roll check for {player_name}: {result is not None}")
         return result
@@ -818,10 +863,15 @@ async def clear_pending_roll_check(game_id: str, player_name: str):
     """Удалить ожидающую проверку из Redis"""
     try:
         key = f"pending_roll:{game_id}:{player_name}"
-        await redis_client.delete(key)
-        logger.info(f"Cleared pending roll check for {player_name}")
+        success = await redis_client.delete(key)
+        if success:
+            logger.info(f"Cleared pending roll check for {player_name}")
+        else:
+            logger.warning(f"No pending roll check found to clear for {player_name}")
+        return success
     except Exception as e:
         logger.error(f"Error clearing pending roll check: {e}")
+        return False
 
 
 async def send_fallback_ai_response(game_id: str, player_action: str, player_name: str):

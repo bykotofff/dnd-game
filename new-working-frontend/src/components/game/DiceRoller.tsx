@@ -259,14 +259,23 @@ const DiceRoller: React.FC<DiceRollerProps> = ({ className = '' }) => {
                                 <SparklesIcon className="h-4 w-4" />
                                 Требуется проверка: {pendingRollRequest.metadata.skill_display}
                             </h4>
+
+                            {/* ✅ НОВОЕ: Показываем четкую инструкцию по броску */}
+                            <div className="bg-white dark:bg-gray-800 p-3 rounded border mb-3">
+                                <p className="text-sm font-medium text-gray-900 dark:text-white">
+                                    📋 Инструкция: Бросьте <span className="font-bold text-blue-600">{pendingRollRequest.metadata.dice_instruction}</span>
+                                </p>
+                            </div>
+
                             <p className="text-sm text-blue-600 dark:text-blue-300 mb-2">
-                                Бросьте d20 - модификатор (+{pendingRollRequest.metadata.modifier}) будет добавлен автоматически
+                                Модификатор +{pendingRollRequest.metadata.modifier} будет добавлен автоматически
                             </p>
+
                             {pendingRollRequest.metadata.advantage && (
-                                <p className="text-sm text-green-600 font-medium">✨ Преимущество</p>
+                                <p className="text-sm text-green-600 font-medium">✨ Преимущество: Бросьте 2d20 и возьмите лучший</p>
                             )}
                             {pendingRollRequest.metadata.disadvantage && (
-                                <p className="text-sm text-red-600 font-medium">⚠️ Помеха</p>
+                                <p className="text-sm text-red-600 font-medium">⚠️ Помеха: Бросьте 2d20 и возьмите худший</p>
                             )}
                         </div>
                     )}
