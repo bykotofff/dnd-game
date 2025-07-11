@@ -959,26 +959,33 @@ const GamePage = () => {
                             </div>
 
                             <div className="flex-1 overflow-y-auto p-3 space-y-2 bg-gray-50 dark:bg-gray-900">
-                                {actualMessages.filter(msg => msg.type === 'chat' || msg.type === 'ooc').map((message, index) => (
-                                    <div key={message.id || index} className="text-sm">
-                                        <div className="flex items-center space-x-2 mb-1">
-                                            <span className="font-medium text-gray-900 dark:text-white">
-                                                {message.author}:
-                                            </span>
-                                            <span className="text-xs text-gray-500 dark:text-gray-400">
-                                                {new Date(message.timestamp).toLocaleTimeString('ru-RU', {
-                                                    hour: '2-digit',
-                                                    minute: '2-digit'
-                                                })}
-                                            </span>
-                                        </div>
-                                        <p className="text-gray-700 dark:text-gray-300 ml-2">
-                                            {message.content}
-                                        </p>
+                                {actualChatMessages.length === 0 ? (
+                                    <div className="text-center text-gray-500 py-8">
+                                        <ChatBubbleLeftIcon className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                                        <p className="text-sm">Пока сообщений нет...</p>
                                     </div>
-                                ))}
+                                ) : (
+                                    actualChatMessages.map((message, index) => (
+                                        <div key={message.id || index} className="text-sm">
+                                            <div className="flex items-center space-x-2 mb-1">
+                                                <span className="font-medium text-gray-900 dark:text-white">
+                                                    {message.sender}:
+                                                </span>
+                                                <span className="text-xs text-gray-500 dark:text-gray-400">
+                                                    {new Date(message.timestamp).toLocaleTimeString('ru-RU', {
+                                                        hour: '2-digit',
+                                                        minute: '2-digit'
+                                                    })}
+                                                </span>
+                                            </div>
+                                            <p className="text-gray-700 dark:text-gray-300 ml-2">
+                                                {message.content}
+                                            </p>
+                                        </div>
+                                    ))
+                                )}
                                 <div ref={chatEndRef} />
-                            </div>
+                             </div>
 
                             <div className="p-3 border-t border-gray-200 dark:border-gray-700">
                                 <form onSubmit={handleChatSubmit} className="flex space-x-2">
