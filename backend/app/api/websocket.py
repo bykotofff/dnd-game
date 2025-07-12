@@ -13,11 +13,13 @@ from app.core.database import get_db_session
 from app.core.redis_client import redis_client
 from app.models.user import User
 from app.models.game import Game
+from app.models.campaign import Campaign
 from app.models.character import Character
 from app.models.game_state import GameMessage
 from app.services.auth_service import auth_service
 from app.services.ai_service import ai_service
 from app.services.dice_service import dice_service
+
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -364,91 +366,382 @@ async def handle_player_action(websocket: WebSocket, game_id: str, user_id: str,
 
     # ✅ НОВОЕ: Автоматически анализируем действие и запрашиваем ответ от ИИ
     try:
-        # Получаем информацию об игре для контекста
-        from app.models.game import Game
+        # Используем новую функцию с реальными данными персонажей
+        await handle_ai_response_with_dice_check(
+            websocket=websocket,
+            game_id=game_id,
+            user_id=user_id,
+            user=user,
+            player_action=action,
+            db=db
+        )
+    except Exception as e:
+        logger.error(f"Failed to process AI response: {e}")
+        # В случае ошибки отправляем простой fallback
+        fallback_msg = WebSocketMessage("ai_response", {
+            "message": f"*{user.username} выполняет действие: {action}*",
+            "sender_name": "Система",
+            "timestamp": datetime.utcnow().isoformat(),
+            "is_fallback": True
+        })
+        await manager.broadcast_to_game(fallback_msg.to_json(), game_id)
+
+async def get_game_players_with_characters(game_id: str, db: AsyncSession) -> list:
+    """
+    Получить информацию о всех игроках в игре с их персонажами
+    """
+    try:
         from sqlalchemy import select
 
+        # Получаем игру
         game_query = select(Game).where(Game.id == game_id)
-        result = await db.execute(game_query)
-        game = result.scalar_one_or_none()
+        game_result = await db.execute(game_query)
+        game = game_result.scalar_one_or_none()
 
-        if game:
-            # Подготавливаем контекст для ИИ
-            context = {
-                "game_name": game.name,
-                "current_scene": game.current_scene,
-                "player_action": action,
-                "player_name": user.username,
-                "game_id": game_id
+        if not game or not game.players:
+            return []
+
+        players_info = []
+
+        # Для каждого игрока получаем его персонажа
+        for player_id in game.players:
+            # Получаем пользователя
+            user_query = select(User).where(User.id == player_id)
+            user_result = await db.execute(user_query)
+            user = user_result.scalar_one_or_none()
+
+            if not user:
+                continue
+
+            # Получаем персонажа игрока в этой игре
+            character = await get_player_character_in_game(game_id, player_id, db)
+            character_data = None
+
+            if character:
+                character_data = await get_character_data_from_db(str(character.id), db)
+
+            player_info = {
+                "user_id": str(user.id),
+                "username": user.username,
+                "character": character_data
             }
 
-            # Анализируем действие и отправляем запрос к ИИ
-            asyncio.create_task(handle_ai_response_with_dice_check(
-                game_id, action, context, user.username, user_id
-            ))
+            players_info.append(player_info)
 
-    except Exception as ai_error:
-        logger.warning(f"Failed to trigger AI response: {ai_error}")
+        return players_info
 
+    except Exception as e:
+        logger.error(f"Error getting game players for game {game_id}: {e}")
+        return []
 
-async def handle_ai_response_with_dice_check(game_id: str, player_action: str, context: dict, player_name: str, user_id: str):
-    """Улучшенная обработка ответа ИИ с проверками кубиками"""
+async def get_character_data_from_db(character_id: str, db: AsyncSession) -> dict:
+    """
+    Получить данные персонажа из базы данных
+    """
     try:
-        logger.info(f"Starting AI response with dice check for player {player_name}")
+        from app.models.character import Character
+        from sqlalchemy import select
 
-        # Проверяем health AI сервиса
-        ai_health = await ai_service.health_check()
-        if not ai_health:
-            logger.warning("AI service is not available")
-            await send_fallback_ai_response(game_id, player_action, player_name)
-            return
+        # Получаем персонажа из БД
+        query = select(Character).where(Character.id == character_id)
+        result = await db.execute(query)
+        character = result.scalar_one_or_none()
 
-        # ✅ ШАГ 1: Анализируем действие игрока для определения нужных проверок
+        if not character:
+            logger.warning(f"Character {character_id} not found in database")
+            return {
+                "name": "Неизвестный персонаж",
+                "class": "Unknown",
+                "level": 1,
+                "abilities": {
+                    "strength": 10,
+                    "dexterity": 10,
+                    "constitution": 10,
+                    "intelligence": 10,
+                    "wisdom": 10,
+                    "charisma": 10
+                },
+                "skills": {},
+                "saving_throws": {}
+            }
+
+        # Формируем данные персонажа для ИИ
         character_data = {
-            "name": player_name,
-            "class": "Fighter",  # Пока заглушка, позже можно получать из БД
+            "id": str(character.id),
+            "name": character.name,
+            "race": character.race,
+            "class": character.character_class,
+            "subclass": character.subclass,
+            "level": character.level,
+            "background": character.background,
+            "alignment": character.alignment,
+
+            # Основные характеристики
+            "abilities": {
+                "strength": character.strength,
+                "dexterity": character.dexterity,
+                "constitution": character.constitution,
+                "intelligence": character.intelligence,
+                "wisdom": character.wisdom,
+                "charisma": character.charisma
+            },
+
+            # Модификаторы характеристик
+            "modifiers": character.get_modifiers(),
+
+            # HP и защита
+            "hit_points": {
+                "current": character.current_hit_points,
+                "max": character.max_hit_points,
+                "temporary": character.temporary_hit_points
+            },
+            "armor_class": character.armor_class,
+            "speed": character.speed,
+            "proficiency_bonus": character.proficiency_bonus,
+
+            # Навыки и спасброски
+            "skills": character.skills or {},
+            "saving_throws": character.saving_throws or {},
+
+            # Владения
+            "proficiencies": character.proficiencies or {},
+
+            # Заклинания (если есть)
+            "spells": character.spells or {},
+
+            # Способности и черты
+            "features": character.features or [],
+
+            # Активные эффекты
+            "active_effects": character.active_effects or [],
+
+            # Инвентарь
+            "inventory": character.inventory or {},
+
+            # Личность
+            "personality": {
+                "traits": character.personality_traits,
+                "ideals": character.ideals,
+                "bonds": character.bonds,
+                "flaws": character.flaws,
+                "backstory": character.backstory
+            }
         }
 
-        dice_analysis = await ai_service.analyze_player_action(
-            action=player_action,
-            character_data=character_data,
-            current_situation=context.get('current_scene', 'Unknown situation')
-        )
+        return character_data
 
-        logger.info(f"Dice analysis result: {dice_analysis}")
+    except Exception as e:
+        logger.error(f"Error getting character data for {character_id}: {e}")
+        return {
+            "name": "Ошибка загрузки",
+            "class": "Unknown",
+            "level": 1,
+            "abilities": {
+                "strength": 10,
+                "dexterity": 10,
+                "constitution": 10,
+                "intelligence": 10,
+                "wisdom": 10,
+                "charisma": 10
+            },
+            "skills": {},
+            "saving_throws": {}
+        }
 
-        # ✅ ШАГ 2: Если нужна проверка, запрашиваем бросок
-        if dice_analysis.get("requires_roll", False):
-            await request_dice_roll(game_id, dice_analysis, player_name, player_action)
-            return  # Ждем результата броска, ИИ ответит после получения результата
+async def get_all_game_characters(game_id: str, db: AsyncSession) -> list:
+    """
+    Получить данные всех персонажей в игре
+    """
+    try:
+        from app.models.game import Game
+        from app.models.character import Character
+        from sqlalchemy import select
 
-        # ✅ ШАГ 3: Если проверка не нужна, генерируем обычный ответ ИИ
-        ai_response = await ai_service.generate_dm_response(
-            game_id=game_id,
-            player_action=player_action,
-            game_context=context,
-            character_sheets=[character_data],
-            recent_messages=[]
-        )
+        # Сначала получаем игру и список ID персонажей
+        game_query = select(Game).where(Game.id == game_id)
+        game_result = await db.execute(game_query)
+        game = game_result.scalar_one_or_none()
 
-        if not ai_response:
-            ai_response = f"🤖 *ИИ Мастер задумался над действием {player_name}. Попробуйте описать свои намерения более подробно!*"
+        if not game or not game.characters:
+            logger.warning(f"No characters found for game {game_id}")
+            return []
 
-        # Отправляем ответ ИИ
-        ai_msg = WebSocketMessage("ai_response", {
-            "message": ai_response,
+        # Получаем всех персонажей одним запросом
+        characters_query = select(Character).where(Character.id.in_(game.characters))
+        characters_result = await db.execute(characters_query)
+        characters = characters_result.scalars().all()
+
+        # Формируем список данных персонажей
+        characters_data = []
+        for character in characters:
+            char_data = await get_character_data_from_db(str(character.id), db)
+            characters_data.append(char_data)
+
+        return characters_data
+
+    except Exception as e:
+        logger.error(f"Error getting all characters for game {game_id}: {e}")
+        return []
+
+async def handle_ai_response_with_dice_check(
+        websocket: WebSocket,
+        game_id: str,
+        user_id: str,
+        user: User,
+        player_action: str,
+        db: AsyncSession
+):
+    """
+    Улучшенная обработка действий игрока с запросом к ИИ и проверками навыков
+    """
+    try:
+        # ✅ ШАГ 1: Получаем реальные данные игры и персонажей из БД
+        from app.models.game import Game
+        from app.models.user import User as UserModel
+        from sqlalchemy import select
+
+        # Получаем игру
+        game_query = select(Game).where(Game.id == game_id)
+        game_result = await db.execute(game_query)
+        game = game_result.scalar_one_or_none()
+
+        if not game:
+            logger.error(f"Game {game_id} not found")
+            return
+
+        # Получаем данные пользователя
+        user_query = select(UserModel).where(UserModel.id == user_id)
+        user_result = await db.execute(user_query)
+        user_data = user_result.scalar_one_or_none()
+
+        player_name = user_data.username if user_data else "Неизвестный игрок"
+
+        # ✅ ШАГ 2: Находим персонажа игрока в этой игре
+        player_character_data = None
+        if game.characters:
+            # Получаем всех персонажей игры
+            all_characters = await get_all_game_characters(game_id, db)
+
+            # Ищем персонажа, принадлежащего текущему пользователю
+            for char_data in all_characters:
+                # Проверяем владельца персонажа через дополнительный запрос
+                char_query = select(Character).where(Character.id == char_data["id"])
+                char_result = await db.execute(char_query)
+                character = char_result.scalar_one_or_none()
+
+                if character and str(character.owner_id) == user_id:
+                    player_character_data = char_data
+                    break
+
+        # Если персонаж не найден, создаем базовые данные
+        if not player_character_data:
+            logger.warning(f"No character found for user {user_id} in game {game_id}")
+            player_character_data = {
+                "name": player_name,
+                "class": "Fighter",  # Значение по умолчанию
+                "level": 1,
+                "abilities": {
+                    "strength": 10,
+                    "dexterity": 10,
+                    "constitution": 10,
+                    "intelligence": 10,
+                    "wisdom": 10,
+                    "charisma": 10
+                },
+                "skills": {},
+                "saving_throws": {}
+            }
+
+        # ✅ ШАГ 3: Получаем всех персонажей для контекста
+        all_party_characters = await get_all_game_characters(game_id, db)
+
+        # ✅ ШАГ 4: Формируем расширенный контекст для ИИ
+        game_context = {
+            "game_name": game.name,
+            "current_scene": game.current_scene or "Неопределенная локация",
+            "world_state": game.world_state or {},
+            "game_settings": game.settings or {},
+            "current_turn": game.current_turn,
+            "party_size": len(all_party_characters),
+            "active_player": player_name,
+            "player_character": player_character_data,
+            "party_characters": all_party_characters
+        }
+
+        logger.info(f"Processing action from {player_name} ({player_character_data['name']}): {player_action}")
+
+        # ✅ ШАГ 5: Анализируем действие с помощью ИИ (если доступен)
+        try:
+            if hasattr(ai_service, 'analyze_player_action'):
+                ai_analysis = await ai_service.analyze_player_action(
+                    action=player_action,
+                    character_data=player_character_data,
+                    game_context=game_context,
+                    party_data=all_party_characters
+                )
+
+                # Отправляем ответ ИИ
+                ai_response_msg = WebSocketMessage("ai_response", {
+                    "message": ai_analysis.get("response", "ИИ Мастер обдумывает ваше действие..."),
+                    "sender_name": "ИИ Мастер",
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "analysis": ai_analysis,
+                    "character_context": player_character_data["name"]
+                })
+
+                await manager.broadcast_to_game(ai_response_msg.to_json(), game_id)
+                return
+
+        except Exception as ai_error:
+            logger.warning(f"AI service error: {ai_error}")
+
+        # ✅ ШАГ 6: Fallback ответ с учетом персонажа
+        character_name = player_character_data["name"]
+        character_class = player_character_data["class"]
+        character_level = player_character_data["level"]
+
+        fallback_response = f"*{character_name} ({character_class} {character_level} уровня) выполняет действие: {player_action}*\n\n"
+
+        # Добавляем классо-специфичные комментарии
+        class_responses = {
+            "Fighter": "Воин решительно действует, готовый к бою.",
+            "Wizard": "Волшебник сосредотачивается, возможно, готовя заклинание.",
+            "Rogue": "Вор действует осторожно и скрытно.",
+            "Cleric": "Клерик призывает силу своего божества.",
+            "Ranger": "Рейнджер использует свои навыки выживания."
+        }
+
+        class_comment = class_responses.get(character_class, "Персонаж действует решительно.")
+        fallback_response += f"{class_comment}\n\n"
+
+        fallback_response += f"*{player_name}, продолжайте игру! Что делаете дальше?*"
+
+        fallback_msg = WebSocketMessage("ai_response", {
+            "message": fallback_response,
             "sender_name": "ИИ Мастер",
             "timestamp": datetime.utcnow().isoformat(),
             "in_response_to": player_action,
-            "responding_to_player": player_name
+            "character_used": character_name,
+            "is_fallback": True
         })
 
-        await manager.broadcast_to_game(ai_msg.to_json(), game_id)
-        logger.info(f"AI response sent for action by {player_name}")
+        await manager.broadcast_to_game(fallback_msg.to_json(), game_id)
+        logger.info(f"Sent character-aware fallback response for {player_name}")
 
     except Exception as e:
-        logger.error(f"Error in AI response with dice check: {e}", exc_info=True)
-        await send_fallback_ai_response(game_id, player_action, player_name)
+        logger.error(f"Error in handle_ai_response_with_dice_check: {e}")
+        # Отправляем минимальный fallback в случае ошибки
+        error_msg = WebSocketMessage("ai_response", {
+            "message": "*Что-то пошло не так с анализом действия. Продолжайте игру!*",
+            "sender_name": "Система",
+            "timestamp": datetime.utcnow().isoformat(),
+            "is_error": True
+        })
+
+        try:
+            await manager.broadcast_to_game(error_msg.to_json(), game_id)
+        except Exception as broadcast_error:
+            logger.error(f"Failed to send error message: {broadcast_error}")
 
 
 async def request_dice_roll(game_id: str, dice_analysis: dict, player_name: str, original_action: str):
