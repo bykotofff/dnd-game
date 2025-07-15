@@ -1,5 +1,3 @@
-# backend/app/models/game.py
-
 from sqlalchemy import Column, String, Integer, Boolean, Text, ForeignKey, Enum as SQLEnum
 from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.postgresql import JSONB, UUID
@@ -36,6 +34,9 @@ class Game(BaseModel):
     players = Column(JSONB, default=[], nullable=False)  # Список ID игроков
     characters = Column(JSONB, default=[], nullable=False)  # Список ID персонажей
 
+    # ✅ НОВОЕ ПОЛЕ: Связь игроков с персонажами
+    player_characters = Column(JSONB, default={}, nullable=False)  # {"user_id": "character_id"}
+
     # Игровое состояние
     current_scene = Column(String(200), nullable=True)  # Текущая сцена/локация
     current_turn = Column(Integer, default=0, nullable=False)  # Номер хода
@@ -56,8 +57,8 @@ class Game(BaseModel):
 
     # Статистика
     session_duration = Column(Integer, default=0, nullable=False)  # В минутах
-    messages_count = Column(Integer, default=0, nullable=False)
-    dice_rolls_count = Column(Integer, default=0, nullable=False)
+    total_messages = Column(Integer, default=0, nullable=False)
+    total_dice_rolls = Column(Integer, default=0, nullable=False)
 
     # Связи
     campaign = relationship("Campaign", back_populates="games")
@@ -66,52 +67,97 @@ class Game(BaseModel):
         return f"<Game(name='{self.name}', status='{self.status}', players={self.current_players}/{self.max_players})>"
 
     def add_player(self, user_id: str, character_id: str = None) -> bool:
-        """Добавить игрока в игру"""
+        """Добавить игрока в игру с персонажем"""
         if self.current_players >= self.max_players:
             return False
 
-        if user_id not in self.players:
-            self.players = self.players + [user_id]
+        user_id_str = str(user_id)
+        players_list = list(self.players) if self.players else []
+
+        if user_id_str not in players_list:
+            players_list.append(user_id_str)
+            self.players = players_list
             self.current_players += 1
 
-            if character_id and character_id not in self.characters:
-                self.characters = self.characters + [character_id]
+            # ✅ НОВАЯ ЛОГИКА: Связываем игрока с персонажем
+            if character_id:
+                player_chars = dict(self.player_characters) if self.player_characters else {}
+                player_chars[user_id_str] = str(character_id)
+                self.player_characters = player_chars
+
+                # Добавляем персонажа в список персонажей игры
+                characters_list = list(self.characters) if self.characters else []
+                character_id_str = str(character_id)
+                if character_id_str not in characters_list:
+                    characters_list.append(character_id_str)
+                    self.characters = characters_list
 
             return True
         return False
 
     def remove_player(self, user_id: str) -> bool:
         """Удалить игрока из игры"""
-        if user_id in self.players:
-            players_list = list(self.players)
-            players_list.remove(user_id)
+        user_id_str = str(user_id)
+        players_list = list(self.players) if self.players else []
+
+        if user_id_str in players_list:
+            players_list.remove(user_id_str)
             self.players = players_list
             self.current_players -= 1
+
+            # ✅ НОВАЯ ЛОГИКА: Удаляем связь игрока с персонажем
+            if self.player_characters and user_id_str in self.player_characters:
+                player_chars = dict(self.player_characters)
+                character_id = player_chars.pop(user_id_str, None)
+                self.player_characters = player_chars
+
+                # Удаляем персонажа из списка персонажей игры
+                if character_id:
+                    characters_list = list(self.characters) if self.characters else []
+                    if character_id in characters_list:
+                        characters_list.remove(character_id)
+                        self.characters = characters_list
+
             return True
         return False
 
-    def add_character(self, character_id: str) -> bool:
-        """Добавить персонажа в игру"""
-        if character_id not in self.characters:
-            self.characters = self.characters + [character_id]
-            return True
-        return False
+    def get_player_character(self, user_id: str) -> str:
+        """Получить ID персонажа игрока"""
+        if not self.player_characters:
+            return None
+        return self.player_characters.get(str(user_id))
 
-    def remove_character(self, character_id: str) -> bool:
-        """Удалить персонажа из игры"""
-        if character_id in self.characters:
-            characters_list = list(self.characters)
-            characters_list.remove(character_id)
-            self.characters = characters_list
-            return True
-        return False
+    def get_character_player(self, character_id: str) -> str:
+        """Получить ID игрока по персонажу"""
+        if not self.player_characters:
+            return None
+
+        character_id_str = str(character_id)
+        for user_id, char_id in self.player_characters.items():
+            if str(char_id) == character_id_str:
+                return user_id
+        return None
+
+    def get_players_info(self) -> dict:
+        """Получить информацию об игроках с их персонажами"""
+        players_info = {}
+        if self.players and self.player_characters:
+            for user_id in self.players:
+                character_id = self.player_characters.get(str(user_id))
+                players_info[str(user_id)] = {
+                    "character_id": character_id,
+                    "is_online": False,  # Будет обновляться в WebSocket
+                }
+        return players_info
 
     def next_turn(self) -> dict:
-        """Переход к следующему ходу"""
-        if self.current_players == 0:
-            return {"error": "No players in game"}
+        """Перейти к следующему ходу"""
+        if not self.players:
+            return {"turn": self.current_turn, "current_player_index": 0, "current_player_id": None}
 
-        self.current_player_index = (self.current_player_index + 1) % self.current_players
+        self.current_player_index = (self.current_player_index + 1) % len(self.players)
+
+        # Если мы прошли всех игроков, увеличиваем номер хода
         if self.current_player_index == 0:
             self.current_turn += 1
 
@@ -131,7 +177,7 @@ class Game(BaseModel):
 
     def is_player_turn(self, user_id: str) -> bool:
         """Проверить, ход ли данного игрока"""
-        return self.get_current_player() == user_id
+        return self.get_current_player() == str(user_id)
 
     def can_join(self) -> bool:
         """Можно ли присоединиться к игре"""
@@ -175,55 +221,46 @@ class Game(BaseModel):
 
     def update_world_state(self, key: str, value: any) -> None:
         """Обновить состояние мира"""
-        world_state = dict(self.world_state)
+        world_state = dict(self.world_state) if self.world_state else {}
         world_state[key] = value
         self.world_state = world_state
 
-    def get_world_state(self, key: str, default=None):
-        """Получить значение из состояния мира"""
-        return self.world_state.get(key, default)
-
-    # ✅ ИСПРАВЛЕННЫЙ МЕТОД: Возвращает данные в формате, совместимом с GameResponse
     def get_game_info(self) -> dict:
-        """Получить информацию об игре для API ответа"""
+        """Получить краткую информацию об игре"""
         return {
             "id": str(self.id),
             "name": self.name,
             "description": self.description,
             "status": self.status.value,
-            "current_players": self.current_players,  # ✅ Прямое поле
-            "max_players": self.max_players,          # ✅ Прямое поле
+            "current_players": self.current_players,
+            "max_players": self.max_players,
             "current_scene": self.current_scene,
             "created_at": self.created_at.isoformat(),
         }
 
-    # ✅ НОВЫЙ МЕТОД: Подробная информация для детального просмотра
     def get_detailed_game_info(self) -> dict:
-        """Получить подробную информацию об игре"""
+        """Получить детальную информацию об игре"""
         return {
             "id": str(self.id),
             "name": self.name,
             "description": self.description,
             "status": self.status.value,
             "campaign_id": str(self.campaign_id),
-            "players": {
-                "current": self.current_players,
-                "max": self.max_players,
-                "list": self.players,
-            },
-            "characters": self.characters,
+            "players": self.get_players_info(),  # ✅ ОБНОВЛЕНО: Теперь включает персонажей
+            "characters": list(self.characters) if self.characters else [],
+            "player_characters": dict(self.player_characters) if self.player_characters else {},  # ✅ НОВОЕ ПОЛЕ
             "current_scene": self.current_scene,
             "turn_info": {
-                "turn": self.current_turn,
+                "current_turn": self.current_turn,
                 "current_player_index": self.current_player_index,
                 "current_player_id": self.get_current_player(),
             },
-            "settings": self.settings,
-            "world_state": self.world_state,
+            "settings": dict(self.settings) if self.settings else {},
+            "world_state": dict(self.world_state) if self.world_state else {},
             "statistics": {
                 "session_duration": self.session_duration,
-                "messages_count": self.messages_count,
-                "dice_rolls_count": self.dice_rolls_count,
+                "total_messages": self.total_messages,
+                "total_dice_rolls": self.total_dice_rolls,
             },
             "created_at": self.created_at.isoformat(),
             "updated_at": self.updated_at.isoformat(),

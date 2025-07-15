@@ -218,8 +218,9 @@ async def get_game(
         current_user: User = Depends(get_current_user),
         db: AsyncSession = Depends(get_db_session)
 ):
-    """Получить детальную информацию об игре"""
+    """Получить детальную информацию об игре с информацией о персонажах"""
     try:
+        # Основной запрос игры
         query = select(Game).where(Game.id == game_id)
         result = await db.execute(query)
         game = result.scalar_one_or_none()
@@ -230,7 +231,7 @@ async def get_game(
                 detail="Game not found"
             )
 
-        # Проверяем права доступа (участник игры или создатель кампании)
+        # Проверяем права доступа
         campaign_query = select(Campaign).where(Campaign.id == game.campaign_id)
         campaign_result = await db.execute(campaign_query)
         campaign = campaign_result.scalar_one()
@@ -246,8 +247,44 @@ async def get_game(
                 detail="Access denied"
             )
 
-        # ✅ Используем подробный метод
+        # ✅ НОВАЯ ЛОГИКА: Получаем информацию о персонажах
         game_info = game.get_detailed_game_info()
+
+        # Если есть персонажи в игре, загружаем их данные
+        if game.characters:
+            from app.models.character import Character
+            from app.models.user import User as UserModel
+
+            # Загружаем персонажей
+            chars_query = select(Character).where(Character.id.in_(game.characters))
+            chars_result = await db.execute(chars_query)
+            characters = chars_result.scalars().all()
+
+            # Загружаем пользователей для получения имен
+            users_query = select(UserModel).where(UserModel.id.in_(game.players))
+            users_result = await db.execute(users_query)
+            users = {str(user.id): user for user in users_result.scalars().all()}
+
+            # Обогащаем информацию о игроках
+            enriched_players = {}
+            for user_id in game.players:
+                character_id = game.player_characters.get(user_id) if game.player_characters else None
+                character = next((c for c in characters if str(c.id) == character_id), None) if character_id else None
+                user = users.get(user_id)
+
+                enriched_players[user_id] = {
+                    "user_id": user_id,
+                    "username": user.username if user else "Неизвестный игрок",
+                    "character_id": character_id,
+                    "character_name": character.name if character else None,
+                    "character_class": character.character_class if character else None,
+                    "character_level": character.level if character else None,
+                    "character_race": character.race if character else None,
+                    "is_online": False,  # Будет обновляться через WebSocket
+                }
+
+            game_info["players"] = enriched_players
+
         return GameDetailResponse(**game_info)
 
     except HTTPException:
@@ -322,7 +359,7 @@ async def join_game(
         current_user: User = Depends(get_current_user),
         db: AsyncSession = Depends(get_db_session)
 ):
-    """Присоединиться к игре"""
+    """Присоединиться к игре с выбранным персонажем"""
     try:
         query = select(Game).where(Game.id == game_id)
         result = await db.execute(query)
@@ -357,11 +394,43 @@ async def join_game(
                 detail="Only campaign participants can join the game"
             )
 
-        # Добавляем игрока
-        if game.add_player(user_id, join_data.character_id):
+        # ✅ НОВАЯ ЛОГИКА: Проверяем персонажа если указан
+        character_id = join_data.character_id
+        if character_id:
+            # Импортируем модель Character
+            from app.models.character import Character
+
+            # Проверяем что персонаж принадлежит пользователю
+            char_query = select(Character).where(
+                Character.id == character_id,
+                Character.owner_id == current_user.id
+            )
+            char_result = await db.execute(char_query)
+            character = char_result.scalar_one_or_none()
+
+            if not character:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Character not found or does not belong to you"
+                )
+
+            # Проверяем что персонаж еще не используется в этой игре
+            if character_id in (game.characters or []):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Character is already in this game"
+                )
+
+        # Добавляем игрока с персонажем
+        if game.add_player(user_id, character_id):
             await db.commit()
-            logger.info(f"User {current_user.username} joined game {game.name}")
-            return {"message": "Successfully joined game"}
+            logger.info(f"User {current_user.username} joined game {game.name} with character {character_id}")
+
+            response_data = {"message": "Successfully joined game"}
+            if character_id:
+                response_data["character_id"] = character_id
+
+            return response_data
         else:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -377,6 +446,7 @@ async def join_game(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to join game"
         )
+
 
 
 @router.post("/{game_id}/leave")

@@ -1,41 +1,46 @@
+// new-working-frontend/src/pages/campaigns/CampaignDetailPage.tsx (ОБНОВЛЕННАЯ ВЕРСИЯ)
 import React, { useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { useQuery, useMutation, useQueryClient } from 'react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'react-hot-toast';
-import { motion } from 'framer-motion';
 import {
     ArrowLeftIcon,
-    UsersIcon,
-    StarIcon,
-    CalendarIcon,
-    GlobeAltIcon,
-    LockClosedIcon,
     PencilIcon,
-    TrashIcon,
     PlayIcon,
     UserPlusIcon,
     ChatBubbleLeftRightIcon,
-    CogIcon,
+    TrashIcon,
+    UsersIcon,
+    CalendarIcon,
+    MapPinIcon,
     BookOpenIcon,
-    SparklesIcon,
+    CogIcon,
 } from '@heroicons/react/24/outline';
 
 import { Button } from '@/components/ui/Button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import LoadingScreen from '@/components/ui/LoadingScreen';
+import { CharacterSelectionModal } from '@/components/CharacterSelectionModal'; // ✅ НОВЫЙ ИМПОРТ
 import { campaignService } from '@/services/campaignService';
-import { gameService } from '@/services/gameService';  // ✅ Добавлен импорт
+import { gameService } from '@/services/gameService';
 import { useAuthStore } from '@/store/authStore';
-import type { CampaignDetailResponse } from '@/services/campaignService';
+import type { CharacterResponse } from '@/types/character'; // ✅ НОВЫЙ ИМПОРТ
 
 const CampaignDetailPage: React.FC = () => {
     const { id } = useParams<{ id: string }>();
     const navigate = useNavigate();
-    const queryClient = useQueryClient();
     const { user } = useAuthStore();
-    const [activeTab, setActiveTab] = useState<'overview' | 'world' | 'players' | 'settings'>('overview');
+    const queryClient = useQueryClient();
 
-    const { data: campaign, isLoading, error } = useQuery(
+    // ✅ НОВОЕ СОСТОЯНИЕ для модального окна выбора персонажа
+    const [isCharacterModalOpen, setIsCharacterModalOpen] = useState(false);
+    const [selectedCharacter, setSelectedCharacter] = useState<CharacterResponse | null>(null);
+
+    const {
+        data: campaign,
+        isLoading,
+        error,
+    } = useQuery(
         ['campaign', id],
         () => campaignService.getCampaign(id!),
         {
@@ -70,9 +75,9 @@ const CampaignDetailPage: React.FC = () => {
         }
     );
 
-    // ✅ НОВАЯ ЛОГИКА: Мутация для запуска игры
+    // ✅ ОБНОВЛЕННАЯ ЛОГИКА: Мутация для запуска игры с выбранным персонажем
     const startGameMutation = useMutation(
-        async () => {
+        async ({ characterId }: { characterId: string }) => {
             if (!campaign?.id) throw new Error('Campaign ID is required');
 
             // Сначала ищем существующие игры для этой кампании
@@ -82,6 +87,8 @@ const CampaignDetailPage: React.FC = () => {
                 // Если игра существует, берем первую активную
                 const activeGame = games.find(g => g.status === 'active' || g.status === 'waiting');
                 if (activeGame) {
+                    // Присоединяемся к существующей игре с выбранным персонажем
+                    await gameService.joinGame(activeGame.id, { character_id: characterId });
                     return { gameId: activeGame.id, isNew: false };
                 }
             }
@@ -94,10 +101,16 @@ const CampaignDetailPage: React.FC = () => {
                 max_players: campaign.max_players
             });
 
+            // Присоединяемся к новой игре с выбранным персонажем
+            await gameService.joinGame(newGame.id, { character_id: characterId });
+
             return { gameId: newGame.id, isNew: true };
         },
         {
             onSuccess: (data) => {
+                setIsCharacterModalOpen(false);
+                setSelectedCharacter(null);
+
                 if (data.isNew) {
                     toast.success('Игра создана! Переходим к игре...');
                 } else {
@@ -112,9 +125,22 @@ const CampaignDetailPage: React.FC = () => {
             onError: (error: any) => {
                 console.error('Error starting game:', error);
                 toast.error(error.response?.data?.detail || 'Ошибка при запуске игры');
+                setIsCharacterModalOpen(false);
+                setSelectedCharacter(null);
             },
         }
     );
+
+    // ✅ НОВАЯ ФУНКЦИЯ: Обработка клика по кнопке "Начать игру"
+    const handleStartGameClick = () => {
+        setIsCharacterModalOpen(true);
+    };
+
+    // ✅ НОВАЯ ФУНКЦИЯ: Обработка выбора персонажа
+    const handleCharacterSelected = (character: CharacterResponse) => {
+        setSelectedCharacter(character);
+        startGameMutation.mutate({ characterId: character.id });
+    };
 
     if (isLoading) return <LoadingScreen />;
     if (error || !campaign) {
@@ -175,230 +201,346 @@ const CampaignDetailPage: React.FC = () => {
     };
 
     return (
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-            {/* Header */}
-            <div className="mb-8">
-                <div className="flex items-center justify-between mb-6">
-                    <Button
-                        variant="ghost"
-                        onClick={() => navigate('/campaigns')}
-                        className="flex items-center gap-2"
-                    >
-                        <ArrowLeftIcon className="w-4 h-4" />
-                        Вернуться к кампаниям
-                    </Button>
+        <>
+            <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+                {/* Header */}
+                <div className="mb-8">
+                    <div className="flex items-center justify-between mb-6">
+                        <Button
+                            variant="ghost"
+                            onClick={() => navigate('/campaigns')}
+                            className="flex items-center gap-2"
+                        >
+                            <ArrowLeftIcon className="w-4 h-4" />
+                            Вернуться к кампаниям
+                        </Button>
 
-                    <div className="flex items-center gap-3">
-                        {/* Кнопки для создателя */}
-                        {isCreator && (
-                            <>
-                                <Link to={`/campaigns/${id}/edit`}>
-                                    <Button variant="outline" className="flex items-center gap-2">
-                                        <PencilIcon className="w-4 h-4" />
-                                        Редактировать
+                        <div className="flex items-center gap-3">
+                            {/* Кнопки для создателя */}
+                            {isCreator && (
+                                <>
+                                    <Link to={`/campaigns/${id}/edit`}>
+                                        <Button variant="outline" className="flex items-center gap-2">
+                                            <PencilIcon className="w-4 h-4" />
+                                            Редактировать
+                                        </Button>
+                                    </Link>
+
+                                    {/* ✅ ОБНОВЛЕННАЯ КНОПКА "Начать игру" с выбором персонажа */}
+                                    <Button
+                                        variant="primary"
+                                        className="flex items-center gap-2"
+                                        onClick={handleStartGameClick}
+                                        disabled={startGameMutation.isLoading}
+                                    >
+                                        {startGameMutation.isLoading ? (
+                                            <>
+                                                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
+                                                Запуск...
+                                            </>
+                                        ) : (
+                                            <>
+                                                <PlayIcon className="w-4 h-4" />
+                                                Начать игру
+                                            </>
+                                        )}
                                     </Button>
-                                </Link>
+                                </>
+                            )}
 
-                                {/* ✅ ИСПРАВЛЕННАЯ КНОПКА "Начать игру" */}
+                            {/* Кнопка присоединения для других пользователей */}
+                            {canJoin && (
+                                <Button
+                                    variant="primary"
+                                    onClick={() => joinMutation.mutate()}
+                                    disabled={joinMutation.isLoading}
+                                    className="flex items-center gap-2"
+                                >
+                                    {joinMutation.isLoading ? (
+                                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
+                                    ) : (
+                                        <UserPlusIcon className="w-4 h-4" />
+                                    )}
+                                    Присоединиться
+                                </Button>
+                            )}
+
+                            {/* ✅ ОБНОВЛЕННАЯ КНОПКА для игроков - перейти к игре с выбором персонажа */}
+                            {isPlayer && !isCreator && (
                                 <Button
                                     variant="primary"
                                     className="flex items-center gap-2"
-                                    onClick={() => startGameMutation.mutate()}
+                                    onClick={handleStartGameClick}
                                     disabled={startGameMutation.isLoading}
                                 >
                                     {startGameMutation.isLoading ? (
-                                        <>
-                                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
-                                            Запуск...
-                                        </>
+                                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
                                     ) : (
-                                        <>
-                                            <PlayIcon className="w-4 h-4" />
-                                            Начать игру
-                                        </>
+                                        <ChatBubbleLeftRightIcon className="w-4 h-4" />
                                     )}
+                                    Перейти к игре
                                 </Button>
-                            </>
-                        )}
+                            )}
 
-                        {/* Кнопка присоединения для других пользователей */}
-                        {canJoin && (
-                            <Button
-                                variant="primary"
-                                onClick={() => joinMutation.mutate()}
-                                disabled={joinMutation.isLoading}
-                                className="flex items-center gap-2"
-                            >
-                                {joinMutation.isLoading ? (
-                                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
-                                ) : (
-                                    <UserPlusIcon className="w-4 h-4" />
-                                )}
-                                Присоединиться
-                            </Button>
-                        )}
+                            {/* Кнопка удаления для создателя */}
+                            {isCreator && (
+                                <Button
+                                    variant="danger"
+                                    size="sm"
+                                    onClick={() => {
+                                        if (window.confirm('Вы уверены, что хотите архивировать эту кампанию?'))
+                                            deleteMutation.mutate();
+                                    }}
+                                    disabled={deleteMutation.isLoading}
+                                    className="flex items-center gap-2"
+                                >
+                                    <TrashIcon className="w-4 h-4" />
+                                    {deleteMutation.isLoading ? 'Удаление...' : 'Архивировать'}
+                                </Button>
+                            )}
+                        </div>
+                    </div>
 
-                        {/* Кнопка для игроков - перейти к игре */}
-                        {isPlayer && !isCreator && (
-                            <Button
-                                variant="primary"
-                                className="flex items-center gap-2"
-                                onClick={() => startGameMutation.mutate()}
-                                disabled={startGameMutation.isLoading}
-                            >
-                                {startGameMutation.isLoading ? (
-                                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
-                                ) : (
-                                    <ChatBubbleLeftRightIcon className="w-4 h-4" />
-                                )}
-                                Перейти к игре
-                            </Button>
-                        )}
-
-                        {/* Кнопка удаления для создателя */}
-                        {isCreator && (
-                            <Button
-                                variant="danger"
-                                size="sm"
-                                onClick={() => {
-                                    if (window.confirm('Вы уверены, что хотите архивировать эту кампанию?')) {
-                                        deleteMutation.mutate();
-                                    }
-                                }}
-                                disabled={deleteMutation.isLoading}
-                            >
-                                <TrashIcon className="w-4 h-4 mr-2" />
-                                Архивировать
-                            </Button>
-                        )}
+                    {/* Campaign Title & Status */}
+                    <div className="flex items-center justify-between">
+                        <div>
+                            <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
+                                {campaign.name}
+                            </h1>
+                            <div className="flex items-center gap-4 mt-2">
+                                {getStatusBadge(campaign.status)}
+                                <span className="text-sm text-gray-500 dark:text-gray-400">
+                                    Создана {formatDate(campaign.created_at)}
+                                </span>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
-                {/* Campaign Info */}
-                <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-6">
-                    <div className="flex-1">
-                        <div className="flex items-center gap-3 mb-4">
-                            <h1 className="text-3xl font-bold font-fantasy text-gray-900 dark:text-white">
-                                {campaign.name}
-                            </h1>
-                            {getStatusBadge(campaign.status)}
-                            {campaign.is_public ? (
-                                <GlobeAltIcon className="w-5 h-5 text-green-500" title="Публичная кампания" />
-                            ) : (
-                                <LockClosedIcon className="w-5 h-5 text-amber-500" title="Приватная кампания" />
-                            )}
-                        </div>
-
+                {/* Campaign Details Grid */}
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                    {/* Main Content */}
+                    <div className="lg:col-span-2 space-y-6">
+                        {/* Description */}
                         {campaign.description && (
-                            <p className="text-gray-600 dark:text-gray-300 mb-4 leading-relaxed">
-                                {campaign.description}
-                            </p>
+                            <Card>
+                                <CardHeader>
+                                    <CardTitle className="flex items-center gap-2">
+                                        <BookOpenIcon className="w-5 h-5" />
+                                        Описание
+                                    </CardTitle>
+                                </CardHeader>
+                                <CardContent>
+                                    <p className="text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
+                                        {campaign.description}
+                                    </p>
+                                </CardContent>
+                            </Card>
                         )}
 
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                            <div className="text-center p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
-                                <div className="text-2xl font-bold text-primary-600 dark:text-primary-400">
-                                    {currentPlayers}
-                                </div>
-                                <div className="text-sm text-gray-500 dark:text-gray-400">
-                                    из {maxPlayers} игроков
-                                </div>
-                            </div>
+                        {/* World Description */}
+                        {campaign.world_description && (
+                            <Card>
+                                <CardHeader>
+                                    <CardTitle className="flex items-center gap-2">
+                                        <MapPinIcon className="w-5 h-5" />
+                                        Игровой мир
+                                    </CardTitle>
+                                </CardHeader>
+                                <CardContent>
+                                    <p className="text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
+                                        {campaign.world_description}
+                                    </p>
+                                </CardContent>
+                            </Card>
+                        )}
 
-                            <div className="text-center p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
-                                <div className="text-2xl font-bold text-primary-600 dark:text-primary-400">
-                                    {campaign.starting_level}
-                                </div>
-                                <div className="text-sm text-gray-500 dark:text-gray-400">
-                                    Стартовый уровень
-                                </div>
-                            </div>
+                        {/* House Rules */}
+                        {campaign.house_rules && (
+                            <Card>
+                                <CardHeader>
+                                    <CardTitle className="flex items-center gap-2">
+                                        <CogIcon className="w-5 h-5" />
+                                        Домашние правила
+                                    </CardTitle>
+                                </CardHeader>
+                                <CardContent>
+                                    <p className="text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
+                                        {campaign.house_rules}
+                                    </p>
+                                </CardContent>
+                            </Card>
+                        )}
+                    </div>
 
-                            {campaign.setting && (
-                                <div className="text-center p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
-                                    <div className="text-lg font-semibold text-primary-600 dark:text-primary-400 truncate">
-                                        {campaign.setting}
-                                    </div>
-                                    <div className="text-sm text-gray-500 dark:text-gray-400">
+                    {/* Sidebar */}
+                    <div className="space-y-6">
+                        {/* Campaign Info */}
+                        <Card>
+                            <CardHeader>
+                                <CardTitle className="flex items-center gap-2">
+                                    <UsersIcon className="w-5 h-5" />
+                                    Информация о кампании
+                                </CardTitle>
+                            </CardHeader>
+                            <CardContent className="space-y-4">
+                                <div>
+                                    <dt className="text-sm font-medium text-gray-500 dark:text-gray-400">
+                                        Создатель
+                                    </dt>
+                                    <dd className="text-sm text-gray-900 dark:text-white">
+                                        {campaign.creator_username || 'Неизвестен'}
+                                    </dd>
+                                </div>
+
+                                <div>
+                                    <dt className="text-sm font-medium text-gray-500 dark:text-gray-400">
                                         Сеттинг
-                                    </div>
+                                    </dt>
+                                    <dd className="text-sm text-gray-900 dark:text-white">
+                                        {campaign.setting || 'Не указан'}
+                                    </dd>
                                 </div>
-                            )}
 
-                            <div className="text-center p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
-                                <div className="text-lg font-semibold text-primary-600 dark:text-primary-400">
-                                    ⚖️
+                                <div>
+                                    <dt className="text-sm font-medium text-gray-500 dark:text-gray-400">
+                                        Игроки
+                                    </dt>
+                                    <dd className="text-sm text-gray-900 dark:text-white">
+                                        {currentPlayers} / {maxPlayers}
+                                    </dd>
                                 </div>
-                                <div className="text-sm text-gray-500 dark:text-gray-400">
-                                    ИИ {campaign.ai_style || 'balanced'}
+
+                                <div>
+                                    <dt className="text-sm font-medium text-gray-500 dark:text-gray-400">
+                                        Начальный уровень
+                                    </dt>
+                                    <dd className="text-sm text-gray-900 dark:text-white">
+                                        {campaign.starting_level || 1} уровень
+                                    </dd>
                                 </div>
-                            </div>
-                        </div>
+
+                                {campaign.ai_style && (
+                                    <div>
+                                        <dt className="text-sm font-medium text-gray-500 dark:text-gray-400">
+                                            Стиль ИИ-мастера
+                                        </dt>
+                                        <dd className="text-sm text-gray-900 dark:text-white">
+                                            {campaign.ai_style === 'balanced' ? 'Сбалансированный' :
+                                                campaign.ai_style === 'serious' ? 'Серьезный' :
+                                                    campaign.ai_style === 'humorous' ? 'Юмористический' :
+                                                        campaign.ai_style === 'dramatic' ? 'Драматический' :
+                                                            campaign.ai_style}
+                                        </dd>
+                                    </div>
+                                )}
+
+                                <div>
+                                    <dt className="text-sm font-medium text-gray-500 dark:text-gray-400">
+                                        Статус
+                                    </dt>
+                                    <dd className="text-sm">
+                                        {getStatusBadge(campaign.status)}
+                                    </dd>
+                                </div>
+                            </CardContent>
+                        </Card>
+
+                        {/* Game Settings */}
+                        {campaign.settings && Object.keys(campaign.settings).length > 0 && (
+                            <Card>
+                                <CardHeader>
+                                    <CardTitle className="flex items-center gap-2">
+                                        <CogIcon className="w-5 h-5" />
+                                        Настройки игры
+                                    </CardTitle>
+                                </CardHeader>
+                                <CardContent>
+                                    <div className="space-y-2 text-sm">
+                                        {campaign.settings.milestone_leveling !== undefined && (
+                                            <div className="flex justify-between">
+                                                <span className="text-gray-600 dark:text-gray-400">
+                                                    Развитие по вехам
+                                                </span>
+                                                <span className="text-gray-900 dark:text-white">
+                                                    {campaign.settings.milestone_leveling ? 'Да' : 'Нет'}
+                                                </span>
+                                            </div>
+                                        )}
+                                        {campaign.settings.allow_homebrew !== undefined && (
+                                            <div className="flex justify-between">
+                                                <span className="text-gray-600 dark:text-gray-400">
+                                                    Homebrew контент
+                                                </span>
+                                                <span className="text-gray-900 dark:text-white">
+                                                    {campaign.settings.allow_homebrew ? 'Разрешен' : 'Запрещен'}
+                                                </span>
+                                            </div>
+                                        )}
+                                        {campaign.settings.pvp_allowed !== undefined && (
+                                            <div className="flex justify-between">
+                                                <span className="text-gray-600 dark:text-gray-400">
+                                                    PvP
+                                                </span>
+                                                <span className="text-gray-900 dark:text-white">
+                                                    {campaign.settings.pvp_allowed ? 'Разрешен' : 'Запрещен'}
+                                                </span>
+                                            </div>
+                                        )}
+                                    </div>
+                                </CardContent>
+                            </Card>
+                        )}
+
+                        {/* Quick Actions */}
+                        <Card>
+                            <CardHeader>
+                                <CardTitle>Быстрые действия</CardTitle>
+                            </CardHeader>
+                            <CardContent className="space-y-2">
+                                {isCreator && (
+                                    <>
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            className="w-full justify-start"
+                                            asChild
+                                        >
+                                            <Link to={`/campaigns/${id}/edit`}>
+                                                <PencilIcon className="w-4 h-4 mr-2" />
+                                                Редактировать кампанию
+                                            </Link>
+                                        </Button>
+                                    </>
+                                )}
+
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="w-full justify-start"
+                                    onClick={() => window.open(`/characters/create`, '_blank')}
+                                >
+                                    <UserPlusIcon className="w-4 h-4 mr-2" />
+                                    Создать персонажа
+                                </Button>
+                            </CardContent>
+                        </Card>
                     </div>
                 </div>
             </div>
 
-            {/* Content */}
-            <Card>
-                <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                        <BookOpenIcon className="w-5 h-5" />
-                        Детали кампании
-                    </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-6">
-                    {campaign.main_story && (
-                        <div>
-                            <h3 className="font-semibold text-gray-900 dark:text-white mb-2">
-                                Основная история
-                            </h3>
-                            <p className="text-gray-600 dark:text-gray-300 whitespace-pre-wrap">
-                                {campaign.main_story}
-                            </p>
-                        </div>
-                    )}
-
-                    {campaign.world_description && (
-                        <div>
-                            <h3 className="font-semibold text-gray-900 dark:text-white mb-2">
-                                Описание мира
-                            </h3>
-                            <p className="text-gray-600 dark:text-gray-300 whitespace-pre-wrap">
-                                {campaign.world_description}
-                            </p>
-                        </div>
-                    )}
-
-                    {campaign.house_rules && (
-                        <div>
-                            <h3 className="font-semibold text-gray-900 dark:text-white mb-2">
-                                Домашние правила
-                            </h3>
-                            <p className="text-gray-600 dark:text-gray-300 whitespace-pre-wrap">
-                                {campaign.house_rules}
-                            </p>
-                        </div>
-                    )}
-
-                    <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
-                        <div className="grid grid-cols-2 gap-4 text-sm">
-                            <div>
-                                <span className="text-gray-500 dark:text-gray-400">Создана:</span>
-                                <span className="ml-2 text-gray-900 dark:text-white">
-                                    {formatDate(campaign.created_at)}
-                                </span>
-                            </div>
-                            <div>
-                                <span className="text-gray-500 dark:text-gray-400">Тип:</span>
-                                <span className="ml-2 text-gray-900 dark:text-white">
-                                    {campaign.is_public ? 'Публичная' : 'Приватная'}
-                                </span>
-                            </div>
-                        </div>
-                    </div>
-                </CardContent>
-            </Card>
-        </div>
+            {/* ✅ МОДАЛЬНОЕ ОКНО ВЫБОРА ПЕРСОНАЖА */}
+            <CharacterSelectionModal
+                isOpen={isCharacterModalOpen}
+                onClose={() => {
+                    setIsCharacterModalOpen(false);
+                    setSelectedCharacter(null);
+                }}
+                onCharacterSelected={handleCharacterSelected}
+                campaignName={campaign.name}
+                loading={startGameMutation.isLoading}
+            />
+        </>
     );
 };
 

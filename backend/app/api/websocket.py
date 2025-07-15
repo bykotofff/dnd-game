@@ -1,25 +1,23 @@
-# backend/app/api/websocket.py - Исправленный WebSocket endpoint
+# backend/app/api/websocket.py
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, HTTPException, Query
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_
-from typing import Dict, List, Optional, Any
 import json
+import asyncio
 import logging
-import asyncio  # ✅ ДОБАВИЛИ ИМПОРТ
 from datetime import datetime
+from typing import Dict, Any, Optional, List
+
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, Query
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
 from app.core.database import get_db_session
-from app.core.redis_client import redis_client
-from app.models.user import User
 from app.models.game import Game
-from app.models.campaign import Campaign
+from app.models.user import User
 from app.models.character import Character
-from app.models.game_state import GameMessage
-from app.services.auth_service import auth_service
+from app.models.campaign import Campaign
 from app.services.ai_service import ai_service
-from app.services.dice_service import dice_service
-
+from app.core.redis_client import redis_client
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -29,10 +27,10 @@ class ConnectionManager:
     """Менеджер WebSocket соединений"""
 
     def __init__(self):
-        # game_id -> {user_id: websocket}
+        # game_id -> {user_id -> websocket}
         self.active_connections: Dict[str, Dict[str, WebSocket]] = {}
-        # user_id -> game_id
-        self.user_games: Dict[str, str] = {}
+        # user_id -> game_id для быстрого поиска
+        self.user_to_game: Dict[str, str] = {}
 
     async def connect(self, websocket: WebSocket, game_id: str, user_id: str):
         """Подключить пользователя к игре"""
@@ -41,70 +39,67 @@ class ConnectionManager:
         if game_id not in self.active_connections:
             self.active_connections[game_id] = {}
 
-        self.active_connections[game_id][user_id] = websocket
-        self.user_games[user_id] = game_id
+        # Отключаем предыдущее соединение если есть
+        if user_id in self.user_to_game:
+            old_game_id = self.user_to_game[user_id]
+            await self.disconnect(old_game_id, user_id)
 
-        # Добавляем игрока в активные в Redis
-        try:
-            await redis_client.add_active_player(game_id, user_id)
-        except Exception as e:
-            logger.warning(f"Failed to add active player to Redis: {e}")
+        self.active_connections[game_id][user_id] = websocket
+        self.user_to_game[user_id] = game_id
 
         logger.info(f"User {user_id} connected to game {game_id}")
 
-    def disconnect(self, user_id: str):
-        """Отключить пользователя"""
-        if user_id in self.user_games:
-            game_id = self.user_games[user_id]
+    async def disconnect(self, game_id: str, user_id: str):
+        """Отключить пользователя от игры"""
+        try:
+            if game_id in self.active_connections and user_id in self.active_connections[game_id]:
+                del self.active_connections[game_id][user_id]
 
-            if game_id in self.active_connections:
-                self.active_connections[game_id].pop(user_id, None)
-
-                # Если в игре не осталось игроков, удаляем игру
+                # Удаляем пустые игры
                 if not self.active_connections[game_id]:
                     del self.active_connections[game_id]
 
-            del self.user_games[user_id]
-
-            # Удаляем из активных в Redis
-            try:
-                asyncio.create_task(redis_client.remove_active_player(game_id, user_id))
-            except Exception as e:
-                logger.warning(f"Failed to remove active player from Redis: {e}")
+            if user_id in self.user_to_game:
+                del self.user_to_game[user_id]
 
             logger.info(f"User {user_id} disconnected from game {game_id}")
+        except Exception as e:
+            logger.error(f"Error disconnecting user {user_id} from game {game_id}: {e}")
 
-    async def send_personal_message(self, message: str, user_id: str):
+    async def send_personal_message(self, message: str, game_id: str, user_id: str):
         """Отправить личное сообщение пользователю"""
-        if user_id in self.user_games:
-            game_id = self.user_games[user_id]
+        try:
             if game_id in self.active_connections and user_id in self.active_connections[game_id]:
                 websocket = self.active_connections[game_id][user_id]
-                try:
-                    await websocket.send_text(message)
-                except:
-                    self.disconnect(user_id)
+                await websocket.send_text(message)
+        except Exception as e:
+            logger.error(f"Error sending personal message to {user_id}: {e}")
+            # Удаляем проблемное соединение
+            await self.disconnect(game_id, user_id)
 
     async def broadcast_to_game(self, message: str, game_id: str, exclude_user: str = None):
-        """Отправить сообщение всем игрокам в игре"""
-        if game_id in self.active_connections:
-            disconnected_users = []
+        """Отправить сообщение всем в игре"""
+        if game_id not in self.active_connections:
+            return
 
-            for user_id, websocket in self.active_connections[game_id].items():
-                if exclude_user and user_id == exclude_user:
-                    continue
+        disconnected_users = []
 
-                try:
-                    await websocket.send_text(message)
-                except:
-                    disconnected_users.append(user_id)
+        for user_id, websocket in self.active_connections[game_id].items():
+            if exclude_user and user_id == exclude_user:
+                continue
 
-            # Удаляем отключенных пользователей
-            for user_id in disconnected_users:
-                self.disconnect(user_id)
+            try:
+                await websocket.send_text(message)
+            except Exception as e:
+                logger.error(f"Error broadcasting to user {user_id}: {e}")
+                disconnected_users.append(user_id)
 
-    def get_game_players(self, game_id: str) -> List[str]:
-        """Получить список игроков в игре"""
+        # Удаляем отключенных пользователей
+        for user_id in disconnected_users:
+            await self.disconnect(game_id, user_id)
+
+    def get_connected_users(self, game_id: str) -> List[str]:
+        """Получить список подключенных пользователей в игре"""
         if game_id in self.active_connections:
             return list(self.active_connections[game_id].keys())
         return []
@@ -115,24 +110,23 @@ manager = ConnectionManager()
 
 
 class WebSocketMessage:
-    """Базовый класс для WebSocket сообщений"""
+    """Класс для структурированных WebSocket сообщений"""
 
-    def __init__(self, type: str, data: Dict[str, Any] = None):
-        self.type = type
-        self.data = data or {}
-        self.timestamp = datetime.utcnow().isoformat()
+    def __init__(self, message_type: str, data: Dict[str, Any]):
+        self.type = message_type
+        self.data = data
 
     def to_json(self) -> str:
         return json.dumps({
             "type": self.type,
-            "data": self.data,
-            "timestamp": self.timestamp
+            "data": self.data
         })
 
 
 async def get_user_from_token(token: str, db: AsyncSession) -> Optional[User]:
     """Получить пользователя по токену"""
     try:
+        from app.api.auth import auth_service
         return await auth_service.get_current_user(token, db)
     except Exception as e:
         logger.warning(f"Failed to get user from token: {e}")
@@ -146,8 +140,10 @@ async def websocket_game_endpoint(
         token: str = Query(...),
         db: AsyncSession = Depends(get_db_session)
 ):
-    """WebSocket endpoint для игры"""
+    """WebSocket endpoint для игры с поддержкой персонажей"""
     user = None
+    character_info = None
+    character_name = None
 
     try:
         # Аутентификация пользователя
@@ -167,13 +163,11 @@ async def websocket_game_endpoint(
             await websocket.close(code=1008, reason="Game not found")
             return
 
-        # ✅ ИСПРАВЛЕНИЕ: Более мягкая проверка доступа
-        # Позволяем подключение если пользователь есть в players ИЛИ это создатель кампании
+        # Проверка доступа
         user_id_str = str(user.id)
         players_list = game.players or []
 
         # Получаем информацию о кампании для проверки создателя
-        from app.models.campaign import Campaign
         campaign_query = select(Campaign).where(Campaign.id == game.campaign_id)
         campaign_result = await db.execute(campaign_query)
         campaign = campaign_result.scalar_one_or_none()
@@ -187,829 +181,443 @@ async def websocket_game_endpoint(
             await websocket.close(code=1008, reason="Access denied")
             return
 
-        # ✅ АВТОМАТИЧЕСКИ ДОБАВЛЯЕМ ИГРОКА В ИГРУ если его там нет
+        # Автоматически добавляем игрока в игру если его там нет
         if not is_player and (is_creator or is_participant):
             if user_id_str not in players_list:
                 players_list.append(user_id_str)
                 game.players = players_list
-                game.current_players = len(players_list)
+                game.current_players += 1
                 await db.commit()
-                logger.info(f"Added user {user.id} to game {game_id} players list")
+                logger.info(f"Auto-added user {user.username} to game {game_id}")
 
-        # Подключаем пользователя
+        # Получаем информацию о персонаже игрока
+        character_info = await get_player_character_info(game, user_id_str, db)
+        character_name = character_info.get('name', user.username) if character_info else user.username
+
+        # Принимаем WebSocket соединение
         await manager.connect(websocket, game_id, user_id_str)
 
-        # Отправляем приветственное сообщение
-        welcome_msg = WebSocketMessage("connected", {
-            "game_id": game_id,
+        # Отправляем приветственное сообщение с именем персонажа
+        welcome_message = WebSocketMessage("system", {
+            "message": f"🎭 {character_name} присоединился к игре!",
+            "player_name": character_name,
             "user_id": user_id_str,
-            "username": user.username,
-            "players_online": manager.get_game_players(game_id)
+            "character_info": character_info,
+            "timestamp": datetime.utcnow().isoformat()
         })
-        await websocket.send_text(welcome_msg.to_json())
 
-        # Уведомляем других игроков о подключении
-        player_joined_msg = WebSocketMessage("player_joined", {
-            "user_id": user_id_str,
-            "username": user.username,
-            "players_online": manager.get_game_players(game_id)
-        })
-        await manager.broadcast_to_game(player_joined_msg.to_json(), game_id, exclude_user=user_id_str)
+        await manager.broadcast_to_game(welcome_message.to_json(), game_id, exclude_user=user_id_str)
 
-        # Отправляем последние сообщения игры
-        try:
-            recent_messages = await redis_client.get_game_messages(game_id, limit=20)
-            if recent_messages:
-                history_msg = WebSocketMessage("message_history", {
-                    "messages": recent_messages
-                })
-                await websocket.send_text(history_msg.to_json())
-        except Exception as e:
-            logger.error(f"Error loading message history: {e}")
+        # Отправляем текущее состояние игры новому игроку
+        game_state = await get_game_state_for_player(game, user, character_info, db)
+        state_message = WebSocketMessage("game_state", game_state)
+        await websocket.send_text(state_message.to_json())
 
         # Основной цикл обработки сообщений
         while True:
             try:
-                # Получаем сообщение от клиента
                 data = await websocket.receive_text()
                 message_data = json.loads(data)
+                message_type = message_data.get("type")
 
-                # Обрабатываем сообщение
-                await handle_websocket_message(
-                    websocket, game_id, user_id_str, user, message_data, db
-                )
-            except json.JSONDecodeError as e:
-                logger.warning(f"Invalid JSON from user {user.id}: {e}")
-                error_msg = WebSocketMessage("error", {"message": "Invalid message format"})
-                await websocket.send_text(error_msg.to_json())
+                if message_type == "chat_message":
+                    await handle_chat_message(websocket, game_id, user_id_str, user, character_name, message_data, db)
+                elif message_type == "player_action":
+                    await handle_player_action(websocket, game_id, user_id_str, user, character_name, character_info, message_data, db)
+                elif message_type == "dice_roll":
+                    await handle_dice_roll(websocket, game_id, user_id_str, user, character_name, message_data, db)
+                elif message_type == "ping":
+                    await websocket.send_text(json.dumps({"type": "pong"}))
+                else:
+                    logger.warning(f"Unknown message type: {message_type}")
 
-    except WebSocketDisconnect:
-        if user:
-            manager.disconnect(str(user.id))
-            # Уведомляем других игроков об отключении
-            player_left_msg = WebSocketMessage("player_left", {
-                "user_id": str(user.id),
-                "username": user.username,
-                "players_online": manager.get_game_players(game_id)
-            })
-            await manager.broadcast_to_game(player_left_msg.to_json(), game_id)
-
-    except Exception as e:
-        logger.error(f"WebSocket error for user {user.id if user else 'unknown'}: {e}")
-        if user:
-            manager.disconnect(str(user.id))
-
-
-async def handle_websocket_message(
-        websocket: WebSocket,
-        game_id: str,
-        user_id: str,
-        user: User,
-        data: Dict[str, Any],
-        db: AsyncSession
-):
-    """Обработка WebSocket сообщений от клиента"""
-    try:
-        message_type = data.get("type", "unknown")
-        message_data = data.get("data", {})
-
-        logger.info(f"Received {message_type} from user {user_id} in game {game_id}")
-
-        if message_type == "chat_message":
-            await handle_chat_message(websocket, game_id, user_id, user, message_data, db)
-
-        elif message_type == "player_action":
-            await handle_player_action(websocket, game_id, user_id, user, message_data, db)
-
-        elif message_type == "dice_roll":
-            await handle_dice_roll(websocket, game_id, user_id, user, message_data, db)
-
-        elif message_type == "join_game":
-            # Уже обработано при подключении
-            pass
-
-        elif message_type == "leave_game":
-            manager.disconnect(user_id)
-
-        elif message_type == "ping":
-            # Heartbeat - отправляем pong
-            pong_msg = WebSocketMessage("pong", {"timestamp": datetime.utcnow().isoformat()})
-            await websocket.send_text(pong_msg.to_json())
-
-        elif message_type == "request_game_state":
-            await handle_request_game_state(websocket, game_id, user_id, user, message_data, db)
-
-        elif message_type == "request_message_history":
-            await handle_request_message_history(websocket, game_id, user_id, user, message_data, db)
-
-        elif message_type == "request_scene_info":
-            await handle_request_scene_info(websocket, game_id, user_id, user, message_data, db)
-
-        else:
-            logger.warning(f"Unknown message type: {message_type}")
-            error_msg = WebSocketMessage("error", {"message": f"Unknown message type: {message_type}"})
-            await websocket.send_text(error_msg.to_json())
-
-    except Exception as e:
-        logger.error(f"Error handling WebSocket message: {e}")
-        error_msg = WebSocketMessage("error", {"message": "Internal server error"})
-        await websocket.send_text(error_msg.to_json())
-
-
-async def handle_chat_message(websocket: WebSocket, game_id: str, user_id: str, user: User, data: Dict[str, Any], db: AsyncSession):
-    """Обработка чат сообщений"""
-    content = data.get("content", "").strip()
-    if not content:
-        return
-
-    # Создаем сообщение для рассылки
-    chat_msg = WebSocketMessage("chat_message", {
-        "content": content,
-        "sender_id": user_id,
-        "sender_name": user.username,
-        "timestamp": datetime.utcnow().isoformat(),
-        "is_ooc": data.get("is_ooc", False)
-    })
-
-    # Сохраняем в Redis
-    try:
-        await redis_client.add_game_message(game_id, {
-            "type": "chat",
-            "content": content,
-            "sender_id": user_id,
-            "sender_name": user.username,
-            "timestamp": datetime.utcnow().isoformat()
-        })
-    except Exception as e:
-        logger.error(f"Failed to save message to Redis: {e}")
-
-    # Рассылаем всем игрокам
-    await manager.broadcast_to_game(chat_msg.to_json(), game_id)
-
-
-async def handle_player_action(websocket: WebSocket, game_id: str, user_id: str, user: User, data: Dict[str, Any], db: AsyncSession):
-    """Обработка действий игрока"""
-    action = data.get("action", "").strip()
-    if not action:
-        return
-
-    # Создаем сообщение о действии
-    action_msg = WebSocketMessage("player_action", {
-        "action": action,
-        "player_id": user_id,
-        "player_name": user.username,
-        "timestamp": datetime.utcnow().isoformat()
-    })
-
-    # Рассылаем всем игрокам
-    await manager.broadcast_to_game(action_msg.to_json(), game_id)
-
-    # ✅ НОВОЕ: Автоматически анализируем действие и запрашиваем ответ от ИИ
-    try:
-        # Используем новую функцию с реальными данными персонажей
-        await handle_ai_response_with_dice_check(
-            websocket=websocket,
-            game_id=game_id,
-            user_id=user_id,
-            user=user,
-            player_action=action,
-            db=db
-        )
-    except Exception as e:
-        logger.error(f"Failed to process AI response: {e}")
-        # В случае ошибки отправляем простой fallback
-        fallback_msg = WebSocketMessage("ai_response", {
-            "message": f"*{user.username} выполняет действие: {action}*",
-            "sender_name": "Система",
-            "timestamp": datetime.utcnow().isoformat(),
-            "is_fallback": True
-        })
-        await manager.broadcast_to_game(fallback_msg.to_json(), game_id)
-
-async def get_game_players_with_characters(game_id: str, db: AsyncSession) -> list:
-    """
-    Получить информацию о всех игроках в игре с их персонажами
-    """
-    try:
-        from sqlalchemy import select
-
-        # Получаем игру
-        game_query = select(Game).where(Game.id == game_id)
-        game_result = await db.execute(game_query)
-        game = game_result.scalar_one_or_none()
-
-        if not game or not game.players:
-            return []
-
-        players_info = []
-
-        # Для каждого игрока получаем его персонажа
-        for player_id in game.players:
-            # Получаем пользователя
-            user_query = select(User).where(User.id == player_id)
-            user_result = await db.execute(user_query)
-            user = user_result.scalar_one_or_none()
-
-            if not user:
+            except WebSocketDisconnect:
+                logger.info(f"WebSocket disconnected for user {user.username} in game {game_id}")
+                break
+            except json.JSONDecodeError:
+                logger.warning(f"Invalid JSON received from user {user.id}")
+                continue
+            except Exception as e:
+                logger.error(f"Error handling WebSocket message: {e}")
                 continue
 
-            # Получаем персонажа игрока в этой игре
-            character = await get_player_character_in_game(game_id, player_id, db)
-            character_data = None
-
-            if character:
-                character_data = await get_character_data_from_db(str(character.id), db)
-
-            player_info = {
-                "user_id": str(user.id),
-                "username": user.username,
-                "character": character_data
-            }
-
-            players_info.append(player_info)
-
-        return players_info
-
     except Exception as e:
-        logger.error(f"Error getting game players for game {game_id}: {e}")
-        return []
+        logger.error(f"WebSocket error for game {game_id}: {e}")
+    finally:
+        if user:
+            await manager.disconnect(game_id, str(user.id))
 
-async def get_character_data_from_db(character_id: str, db: AsyncSession) -> dict:
-    """
-    Получить данные персонажа из базы данных
-    """
+            # Отправляем сообщение о выходе с именем персонажа
+            if character_name:
+                disconnect_message = WebSocketMessage("system", {
+                    "message": f"🚪 {character_name} покинул игру",
+                    "player_name": character_name,
+                    "user_id": str(user.id),
+                    "timestamp": datetime.utcnow().isoformat()
+                })
+                await manager.broadcast_to_game(disconnect_message.to_json(), game_id)
+
+
+async def get_player_character_info(game: Game, user_id: str, db: AsyncSession) -> Optional[Dict[str, Any]]:
+    """Получить информацию о персонаже игрока"""
     try:
-        from app.models.character import Character
-        from sqlalchemy import select
+        if not game.player_characters:
+            return None
 
-        # Получаем персонажа из БД
+        character_id = game.player_characters.get(user_id)
+        if not character_id:
+            return None
+
         query = select(Character).where(Character.id == character_id)
         result = await db.execute(query)
         character = result.scalar_one_or_none()
 
-        if not character:
-            logger.warning(f"Character {character_id} not found in database")
+        if character:
             return {
-                "name": "Неизвестный персонаж",
-                "class": "Unknown",
-                "level": 1,
+                "id": str(character.id),
+                "name": character.name,
+                "race": character.race,
+                "character_class": character.character_class,
+                "level": character.level,
+                "current_hit_points": character.current_hit_points,
+                "max_hit_points": character.max_hit_points,
+                "armor_class": character.armor_class,
                 "abilities": {
-                    "strength": 10,
-                    "dexterity": 10,
-                    "constitution": 10,
-                    "intelligence": 10,
-                    "wisdom": 10,
-                    "charisma": 10
+                    "strength": character.strength,
+                    "dexterity": character.dexterity,
+                    "constitution": character.constitution,
+                    "intelligence": character.intelligence,
+                    "wisdom": character.wisdom,
+                    "charisma": character.charisma,
                 },
-                "skills": {},
-                "saving_throws": {}
+                "skills": character.skills or {},
+                "background": character.background,
             }
-
-        # Формируем данные персонажа для ИИ
-        character_data = {
-            "id": str(character.id),
-            "name": character.name,
-            "race": character.race,
-            "class": character.character_class,
-            "subclass": character.subclass,
-            "level": character.level,
-            "background": character.background,
-            "alignment": character.alignment,
-
-            # Основные характеристики
-            "abilities": {
-                "strength": character.strength,
-                "dexterity": character.dexterity,
-                "constitution": character.constitution,
-                "intelligence": character.intelligence,
-                "wisdom": character.wisdom,
-                "charisma": character.charisma
-            },
-
-            # Модификаторы характеристик
-            "modifiers": character.get_modifiers(),
-
-            # HP и защита
-            "hit_points": {
-                "current": character.current_hit_points,
-                "max": character.max_hit_points,
-                "temporary": character.temporary_hit_points
-            },
-            "armor_class": character.armor_class,
-            "speed": character.speed,
-            "proficiency_bonus": character.proficiency_bonus,
-
-            # Навыки и спасброски
-            "skills": character.skills or {},
-            "saving_throws": character.saving_throws or {},
-
-            # Владения
-            "proficiencies": character.proficiencies or {},
-
-            # Заклинания (если есть)
-            "spells": character.spells or {},
-
-            # Способности и черты
-            "features": character.features or [],
-
-            # Активные эффекты
-            "active_effects": character.active_effects or [],
-
-            # Инвентарь
-            "inventory": character.inventory or {},
-
-            # Личность
-            "personality": {
-                "traits": character.personality_traits,
-                "ideals": character.ideals,
-                "bonds": character.bonds,
-                "flaws": character.flaws,
-                "backstory": character.backstory
-            }
-        }
-
-        return character_data
-
     except Exception as e:
-        logger.error(f"Error getting character data for {character_id}: {e}")
+        logger.error(f"Error getting character info for user {user_id}: {e}")
+
+    return None
+
+
+async def get_game_state_for_player(game: Game, user: User, character_info: Optional[Dict], db: AsyncSession) -> Dict[str, Any]:
+    """Получить состояние игры для конкретного игрока"""
+    try:
+        # Получаем информацию о всех игроках и их персонажах
+        players_info = {}
+        if game.players:
+            users_query = select(User).where(User.id.in_(game.players))
+            users_result = await db.execute(users_query)
+            users = {str(u.id): u for u in users_result.scalars().all()}
+
+            for player_id in game.players:
+                player_user = users.get(player_id)
+                player_char_info = await get_player_character_info(game, player_id, db)
+
+                players_info[player_id] = {
+                    "user_id": player_id,
+                    "username": player_user.username if player_user else "Неизвестный игрок",
+                    "character_name": player_char_info.get('name') if player_char_info else (player_user.username if player_user else "Неизвестный"),
+                    "character_info": player_char_info,
+                    "is_online": True,  # Предполагаем что все подключенные игроки онлайн
+                    "is_current_user": player_id == str(user.id)
+                }
+
         return {
-            "name": "Ошибка загрузки",
-            "class": "Unknown",
-            "level": 1,
-            "abilities": {
-                "strength": 10,
-                "dexterity": 10,
-                "constitution": 10,
-                "intelligence": 10,
-                "wisdom": 10,
-                "charisma": 10
+            "game_id": str(game.id),
+            "game_name": game.name,
+            "status": game.status.value,
+            "current_scene": game.current_scene,
+            "players": players_info,
+            "your_character": character_info,
+            "turn_info": {
+                "current_turn": game.current_turn,
+                "current_player_index": game.current_player_index,
+                "current_player_id": game.get_current_player(),
             },
-            "skills": {},
-            "saving_throws": {}
+            "world_state": dict(game.world_state) if game.world_state else {},
+            "settings": dict(game.settings) if game.settings else {},
         }
 
-async def get_all_game_characters(game_id: str, db: AsyncSession) -> list:
-    """
-    Получить данные всех персонажей в игре
-    """
-    try:
-        from app.models.game import Game
-        from app.models.character import Character
-        from sqlalchemy import select
-
-        # Сначала получаем игру и список ID персонажей
-        game_query = select(Game).where(Game.id == game_id)
-        game_result = await db.execute(game_query)
-        game = game_result.scalar_one_or_none()
-
-        if not game or not game.characters:
-            logger.warning(f"No characters found for game {game_id}")
-            return []
-
-        # Получаем всех персонажей одним запросом
-        characters_query = select(Character).where(Character.id.in_(game.characters))
-        characters_result = await db.execute(characters_query)
-        characters = characters_result.scalars().all()
-
-        # Формируем список данных персонажей
-        characters_data = []
-        for character in characters:
-            char_data = await get_character_data_from_db(str(character.id), db)
-            characters_data.append(char_data)
-
-        return characters_data
-
     except Exception as e:
-        logger.error(f"Error getting all characters for game {game_id}: {e}")
-        return []
+        logger.error(f"Error getting game state: {e}")
+        return {
+            "game_id": str(game.id),
+            "game_name": game.name,
+            "status": game.status.value,
+            "players": {},
+            "error": "Failed to load game state"
+        }
 
-async def handle_ai_response_with_dice_check(
-        websocket: WebSocket,
-        game_id: str,
-        user_id: str,
-        user: User,
-        player_action: str,
-        db: AsyncSession
-):
-    """
-    Улучшенная обработка действий игрока с запросом к ИИ и проверками навыков
-    """
+
+async def handle_chat_message(websocket: WebSocket, game_id: str, user_id: str, user: User, character_name: str, data: Dict[str, Any], db: AsyncSession):
+    """Обработка сообщений чата с именем персонажа"""
     try:
-        # ✅ ШАГ 1: Получаем реальные данные игры и персонажей из БД
-        from app.models.game import Game
-        from app.models.user import User as UserModel
-        from sqlalchemy import select
-
-        # Получаем игру
-        game_query = select(Game).where(Game.id == game_id)
-        game_result = await db.execute(game_query)
-        game = game_result.scalar_one_or_none()
-
-        if not game:
-            logger.error(f"Game {game_id} not found")
+        content = data.get("content", "").strip()
+        if not content:
             return
 
-        # Получаем данные пользователя
-        user_query = select(UserModel).where(UserModel.id == user_id)
-        user_result = await db.execute(user_query)
-        user_data = user_result.scalar_one_or_none()
+        # Создаем сообщение с именем персонажа
+        chat_message = WebSocketMessage("chat_message", {
+            "content": content,
+            "sender_id": user_id,
+            "sender_name": character_name,  # Используем имя персонажа
+            "sender_username": user.username,  # Сохраняем и username для технических целей
+            "timestamp": datetime.utcnow().isoformat(),
+            "message_type": "chat"
+        })
 
-        player_name = user_data.username if user_data else "Неизвестный игрок"
+        # Отправляем всем игрокам в игре
+        await manager.broadcast_to_game(chat_message.to_json(), game_id)
 
-        # ✅ ШАГ 2: Находим персонажа игрока в этой игре
-        player_character_data = None
-        if game.characters:
-            # Получаем всех персонажей игры
-            all_characters = await get_all_game_characters(game_id, db)
+        logger.info(f"Chat message from {character_name} ({user.username}) in game {game_id}")
 
-            # Ищем персонажа, принадлежащего текущему пользователю
-            for char_data in all_characters:
-                # Проверяем владельца персонажа через дополнительный запрос
-                char_query = select(Character).where(Character.id == char_data["id"])
-                char_result = await db.execute(char_query)
-                character = char_result.scalar_one_or_none()
+    except Exception as e:
+        logger.error(f"Error handling chat message: {e}")
 
-                if character and str(character.owner_id) == user_id:
-                    player_character_data = char_data
-                    break
 
-        # Если персонаж не найден, создаем базовые данные
-        if not player_character_data:
-            logger.warning(f"No character found for user {user_id} in game {game_id}")
-            player_character_data = {
-                "name": player_name,
-                "class": "Fighter",  # Значение по умолчанию
-                "level": 1,
-                "abilities": {
-                    "strength": 10,
-                    "dexterity": 10,
-                    "constitution": 10,
-                    "intelligence": 10,
-                    "wisdom": 10,
-                    "charisma": 10
-                },
-                "skills": {},
-                "saving_throws": {}
-            }
+async def handle_player_action(websocket: WebSocket, game_id: str, user_id: str, user: User, character_name: str, character_info: Optional[Dict], data: Dict[str, Any], db: AsyncSession):
+    """Обработка действий игрока с учетом персонажа"""
+    try:
+        action = data.get("action", "").strip()
+        if not action:
+            return
 
-        # ✅ ШАГ 3: Получаем всех персонажей для контекста
-        all_party_characters = await get_all_game_characters(game_id, db)
+        # Отправляем сообщение о действии с именем персонажа
+        action_message = WebSocketMessage("player_action", {
+            "action": action,
+            "player_id": user_id,
+            "player_name": character_name,  # Используем имя персонажа
+            "character_info": character_info,
+            "timestamp": datetime.utcnow().isoformat()
+        })
 
-        # ✅ ШАГ 4: Формируем расширенный контекст для ИИ
-        game_context = {
-            "game_name": game.name,
-            "current_scene": game.current_scene or "Неопределенная локация",
-            "world_state": game.world_state or {},
-            "game_settings": game.settings or {},
-            "current_turn": game.current_turn,
-            "party_size": len(all_party_characters),
-            "active_player": player_name,
-            "player_character": player_character_data,
-            "party_characters": all_party_characters
-        }
+        await manager.broadcast_to_game(action_message.to_json(), game_id)
 
-        logger.info(f"Processing action from {player_name} ({player_character_data['name']}): {player_action}")
-
-        # ✅ ШАГ 5: Анализируем действие с помощью ИИ (если доступен)
+        # Запускаем обработку ИИ с данными персонажа
         try:
-            if hasattr(ai_service, 'analyze_player_action'):
-                ai_analysis = await ai_service.analyze_player_action(
-                    action=player_action,
-                    character_data=player_character_data,
-                    game_context=game_context,
-                    party_data=all_party_characters
-                )
+            query = select(Game).where(Game.id == game_id)
+            result = await db.execute(query)
+            game = result.scalar_one_or_none()
 
-                # Отправляем ответ ИИ
-                ai_response_msg = WebSocketMessage("ai_response", {
-                    "message": ai_analysis.get("response", "ИИ Мастер обдумывает ваше действие..."),
-                    "sender_name": "ИИ Мастер",
-                    "timestamp": datetime.utcnow().isoformat(),
-                    "analysis": ai_analysis,
-                    "character_context": player_character_data["name"]
-                })
+            if game:
+                # Формируем контекст с информацией о персонаже
+                context = {
+                    "game_name": game.name,
+                    "current_scene": game.current_scene,
+                    "player_action": action,
+                    "player_name": character_name,  # Используем имя персонажа
+                    "player_username": user.username,
+                    "character_info": character_info,
+                    "game_id": game_id
+                }
 
-                await manager.broadcast_to_game(ai_response_msg.to_json(), game_id)
-                return
+                # Используем улучшенный анализ с данными персонажа
+                asyncio.create_task(handle_ai_response_with_character(
+                    game_id, action, context, character_name, character_info, user_id
+                ))
 
         except Exception as ai_error:
-            logger.warning(f"AI service error: {ai_error}")
+            logger.warning(f"Failed to trigger AI response: {ai_error}")
 
-        # ✅ ШАГ 6: Fallback ответ с учетом персонажа
-        character_name = player_character_data["name"]
-        character_class = player_character_data["class"]
-        character_level = player_character_data["level"]
+    except Exception as e:
+        logger.error(f"Error handling player action: {e}")
 
-        fallback_response = f"*{character_name} ({character_class} {character_level} уровня) выполняет действие: {player_action}*\n\n"
 
-        # Добавляем классо-специфичные комментарии
-        class_responses = {
-            "Fighter": "Воин решительно действует, готовый к бою.",
-            "Wizard": "Волшебник сосредотачивается, возможно, готовя заклинание.",
-            "Rogue": "Вор действует осторожно и скрытно.",
-            "Cleric": "Клерик призывает силу своего божества.",
-            "Ranger": "Рейнджер использует свои навыки выживания."
-        }
+async def handle_ai_response_with_character(game_id: str, player_action: str, context: Dict, character_name: str, character_info: Optional[Dict], user_id: str):
+    """Улучшенная обработка ответа ИИ с учетом данных персонажа"""
+    try:
+        logger.info(f"Starting AI response with character data for {character_name}")
 
-        class_comment = class_responses.get(character_class, "Персонаж действует решительно.")
-        fallback_response += f"{class_comment}\n\n"
+        # Проверяем health AI сервиса
+        ai_health = await ai_service.health_check()
+        if not ai_health:
+            logger.warning("AI service is not available")
+            await send_fallback_ai_response(game_id, player_action, character_name)
+            return
 
-        fallback_response += f"*{player_name}, продолжайте игру! Что делаете дальше?*"
+        # Используем новый метод с полными данными персонажа
+        if character_info:
+            dice_analysis = await ai_service.analyze_player_action_with_character(
+                action=player_action,
+                character_data=character_info,
+                game_context=context,
+                party_data=[]  # Можно добавить данные о партии
+            )
+        else:
+            # Fallback к старому методу если нет данных о персонаже
+            dice_analysis = await ai_service.analyze_player_action(
+                action=player_action,
+                character_data={"name": character_name, "class": "Fighter"},
+                current_situation=context.get('current_scene', 'Unknown situation')
+            )
 
-        fallback_msg = WebSocketMessage("ai_response", {
-            "message": fallback_response,
+        logger.info(f"Dice analysis result for {character_name}: {dice_analysis}")
+
+        # Если нужна проверка, запрашиваем бросок
+        if dice_analysis.get("requires_roll", False):
+            await request_dice_roll_with_character(game_id, dice_analysis, character_name, character_info, player_action)
+            return
+
+        # Если проверка не нужна, генерируем ответ ИИ с учетом персонажа
+        if character_info:
+            ai_response = await ai_service.generate_character_aware_response(
+                player_action=player_action,
+                character_data=character_info,
+                game_context=context,
+                party_data=[],
+                recent_messages=[]
+            )
+        else:
+            # Fallback к старому методу
+            ai_response = await ai_service.generate_dm_response(
+                game_id=game_id,
+                player_action=player_action,
+                game_context=context,
+                character_sheets=[character_info] if character_info else [],
+                recent_messages=[]
+            )
+
+        if not ai_response:
+            ai_response = f"🤖 *ИИ Мастер задумался над действием {character_name}. Попробуйте описать свои намерения более подробно!*"
+
+        # Отправляем ответ ИИ
+        ai_msg = WebSocketMessage("ai_response", {
+            "message": ai_response,
             "sender_name": "ИИ Мастер",
             "timestamp": datetime.utcnow().isoformat(),
             "in_response_to": player_action,
-            "character_used": character_name,
-            "is_fallback": True
+            "responding_to_player": character_name  # Используем имя персонажа
         })
 
-        await manager.broadcast_to_game(fallback_msg.to_json(), game_id)
-        logger.info(f"Sent character-aware fallback response for {player_name}")
+        await manager.broadcast_to_game(ai_msg.to_json(), game_id)
+        logger.info(f"AI response sent for action by {character_name}")
 
     except Exception as e:
-        logger.error(f"Error in handle_ai_response_with_dice_check: {e}")
-        # Отправляем минимальный fallback в случае ошибки
-        error_msg = WebSocketMessage("ai_response", {
-            "message": "*Что-то пошло не так с анализом действия. Продолжайте игру!*",
-            "sender_name": "Система",
-            "timestamp": datetime.utcnow().isoformat(),
-            "is_error": True
-        })
-
-        try:
-            await manager.broadcast_to_game(error_msg.to_json(), game_id)
-        except Exception as broadcast_error:
-            logger.error(f"Failed to send error message: {broadcast_error}")
+        logger.error(f"Error in AI response with character: {e}", exc_info=True)
+        await send_fallback_ai_response(game_id, player_action, character_name)
 
 
-async def request_dice_roll(game_id: str, dice_analysis: dict, player_name: str, original_action: str):
-    """Запрос броска кубиков от игрока с четкими инструкциями"""
+async def request_dice_roll_with_character(game_id: str, dice_analysis: Dict, character_name: str, character_info: Optional[Dict], original_action: str):
+    """Запрос броска кубиков с учетом данных персонажа"""
     try:
         roll_type = dice_analysis.get("roll_type", "проверка_навыка")
         ability_or_skill = dice_analysis.get("ability_or_skill", "восприятие")
         dc = int(dice_analysis.get("suggested_dc", 15))
         advantage_disadvantage = dice_analysis.get("advantage_disadvantage", "обычно")
 
-        advantage = advantage_disadvantage == "преимущество"
-        disadvantage = advantage_disadvantage == "помеха"
+        # Вычисляем модификатор с учетом данных персонажа
+        modifier = 0
+        if character_info:
+            modifier = ai_service._calculate_modifier(character_info, ability_or_skill)
 
-        # Переводим навыки на русский
-        skill_names = {
-            "ловкость": "Ловкость",
-            "сила": "Сила",
-            "телосложение": "Телосложение",
-            "интеллект": "Интеллект",
-            "мудрость": "Мудрость",
-            "харизма": "Харизма",
-            "скрытность": "Скрытность",
-            "восприятие": "Восприятие",
-            "атлетика": "Атлетика",
-            "убеждение": "Убеждение",
-            "обман": "Обман",
-            "запугивание": "Запугивание",
-            "проницательность": "Проницательность",
-            "расследование": "Расследование",
-            "медицина": "Медицина",
-            "природа": "Природа",
-            "религия": "Религия",
-            "магия": "Магия",
-            "история": "История",
-            "выживание": "Выживание",
-            "обращение_с_животными": "Обращение с животными",
-            "акробатика": "Акробатика",
-            "ловкость_рук": "Ловкость рук",
-            "взлом": "Взлом",
-            "выступление": "Выступление"
-        }
-
-        skill_display = skill_names.get(ability_or_skill.lower(), ability_or_skill.title())
-
-        # Определяем тип кубика и модификатор
-        dice_notation = "1d20"  # Для большинства проверок
-        modifier = get_skill_modifier(ability_or_skill, player_name)
-
-        # ✅ УЛУЧШЕНО: Более конкретные инструкции с указанием кубика
-        action_descriptions = {
-            "скрытность": "осторожно двигается в тенях",
-            "восприятие": "внимательно осматривается",
-            "атлетика": "напрягает мышцы для физического усилия",
-            "убеждение": "подбирает убедительные слова",
-            "обман": "пытается ввести в заблуждение",
-            "магия": "концентрируется на магических энергиях",
-            "расследование": "ищет улики и подсказки",
-            "мудрость": "полагается на житейскую мудрость",
-            "интеллект": "задействует свои знания",
-            "ловкость": "полагается на быстроту и ловкость",
-            "сила": "напрягает все свои силы",
-            "телосложение": "полагается на выносливость",
-            "харизма": "использует природное обаяние"
-        }
-
-        action_desc = action_descriptions.get(ability_or_skill.lower(), f"использует навык {skill_display}")
-
-        # ✅ НОВОЕ: Формируем сообщение с четкими инструкциями по броску
-        dice_instruction = "d20"
-        if advantage:
-            dice_instruction = "2d20 и возьмите лучший результат"
-        elif disadvantage:
-            dice_instruction = "2d20 и возьмите худший результат"
-
-        # Создаем более информативное сообщение
-        roll_request_msg = f"**{player_name}** {action_desc}. Сделайте проверку **{skill_display}** — бросьте **{dice_instruction}**!"
-
-        # Подготавливаем данные для сохранения
-        check_data = {
+        # Сохраняем информацию о проверке
+        await save_pending_roll_check(game_id, character_name, {
             "roll_type": roll_type,
             "ability_or_skill": ability_or_skill,
             "dc": dc,
-            "advantage": advantage,
-            "disadvantage": disadvantage,
-            "original_action": original_action,
-            "dice_notation": dice_notation,
-            "dice_instruction": dice_instruction,
             "modifier": modifier,
-            "skill_display": skill_display
-        }
-
-        # Отправляем запрос броска с четкими инструкциями
-        roll_request = WebSocketMessage("roll_request", {
-            "message": roll_request_msg,
-            "sender_name": "ИИ Мастер",
-            "timestamp": datetime.utcnow().isoformat(),
-            "roll_type": roll_type,
-            "ability_or_skill": ability_or_skill,
-            "skill_display": skill_display,
-            "dice_notation": dice_notation,
-            "dice_instruction": dice_instruction,  # ✅ Четкая инструкция что бросать
-            "modifier": modifier,
-            "advantage": advantage,
-            "disadvantage": disadvantage,
+            "advantage_disadvantage": advantage_disadvantage,
             "original_action": original_action,
-            "requesting_player": player_name,
-            "requires_dice_roll": True,
-            "auto_modifier": True
+            "character_info": character_info
         })
 
-        await manager.broadcast_to_game(roll_request.to_json(), game_id)
+        # Отправляем запрос на бросок
+        skill_display = ability_or_skill.title()
+        modifier_text = f"+{modifier}" if modifier > 0 else str(modifier) if modifier < 0 else ""
 
-        # Сохраняем ожидающую проверку в Redis
-        await store_pending_roll_check(game_id, player_name, check_data, original_action)
+        roll_request_msg = WebSocketMessage("dice_roll_request", {
+            "message": f"🎲 **{character_name}** должен выполнить проверку: **{skill_display}**\n\n"
+                       f"Бросьте d20{modifier_text} (Сложность: {dc})\n"
+                       f"Действие: *{original_action}*",
+            "player_name": character_name,
+            "roll_type": roll_type,
+            "skill": ability_or_skill,
+            "dc": dc,
+            "modifier": modifier,
+            "advantage": advantage_disadvantage == "преимущество",
+            "disadvantage": advantage_disadvantage == "помеха",
+            "timestamp": datetime.utcnow().isoformat()
+        })
 
-        logger.info(f"Dice roll requested for {player_name}: {skill_display} check (DC {dc}) - {dice_instruction}")
+        await manager.broadcast_to_game(roll_request_msg.to_json(), game_id)
+        logger.info(f"Dice roll requested for {character_name}: {skill_display} DC{dc}")
 
     except Exception as e:
         logger.error(f"Error requesting dice roll: {e}")
-        await send_fallback_ai_response(game_id, original_action, player_name)
-
-def get_skill_modifier(ability_or_skill: str, player_name: str) -> int:
-    """Получить модификатор навыка для персонажа"""
-    # ✅ TODO: В будущем здесь будет загрузка реальных характеристик персонажа из БД
-    # Пока используем базовые значения
-
-    base_modifiers = {
-        # Характеристики (базовый модификатор +2 для уровня 1-4)
-        "сила": 2,
-        "ловкость": 3,
-        "телосложение": 1,
-        "интеллект": 1,
-        "мудрость": 2,
-        "харизма": 0,
-
-        # Навыки (характеристика + бонус мастерства +2)
-        "атлетика": 4,  # Сила + мастерство
-        "акробатика": 3,  # Ловкость
-        "ловкость_рук": 3,  # Ловкость
-        "скрытность": 5,  # Ловкость + мастерство
-        "магия": 3,  # Интеллект + мастерство
-        "история": 1,  # Интеллект
-        "расследование": 3,  # Интеллект + мастерство
-        "природа": 1,  # Интеллект
-        "религия": 1,  # Интеллект
-        "обращение_с_животными": 2,  # Мудрость
-        "проницательность": 4,  # Мудрость + мастерство
-        "медицина": 2,  # Мудрость
-        "восприятие": 4,  # Мудрость + мастерство
-        "выживание": 2,  # Мудрость
-        "обман": 0,  # Харизма
-        "запугивание": 0,  # Харизма
-        "выступление": 0,  # Харизма
-        "убеждение": 2,  # Харизма + мастерство
-    }
-
-    return base_modifiers.get(ability_or_skill.lower(), 0)
-
-# Дополните функцию для других типов бросков (не только d20):
-def get_dice_for_action(roll_type: str, ability_or_skill: str) -> tuple[str, str]:
-    """Определить какие кубики нужно бросить для конкретного действия"""
-    # Специальные случаи для разных типов действий
-    special_dice = {
-        # Урон от разных видов оружия
-        "урон_меч": ("1d8", "1d8"),
-        "урон_лук": ("1d6", "1d6"),
-        "урон_топор": ("1d12", "1d12"),
-        "урон_кинжал": ("1d4", "1d4"),
-
-        # Лечение
-        "лечение": ("1d4", "1d4"),
-        "зелье_лечения": ("2d4+2", "2d4+2"),
-
-        # Хиты при повышении уровня
-        "хиты": ("1d8", "1d8"),  # Для большинства классов
-
-        # Инициатива
-        "инициатива": ("1d20", "d20"),
-    }
-
-    # Проверяем специальные случаи
-    key = f"{roll_type}_{ability_or_skill}".lower()
-    if key in special_dice:
-        return special_dice[key]
-
-    # Для большинства проверок используем d20
-    if roll_type in ["проверка_навыка", "проверка_характеристики", "спасбросок", "атака"]:
-        return ("1d20", "d20")
-
-    # По умолчанию d20
-    return ("1d20", "d20")
 
 
-
-async def handle_dice_roll(websocket: WebSocket, game_id: str, user_id: str, user: User, data: Dict[str, Any], db: AsyncSession):
-    """Улучшенная обработка броска костей"""
+async def handle_dice_roll(websocket: WebSocket, game_id: str, user_id: str, user: User, character_name: str, data: Dict[str, Any], db: AsyncSession):
+    """Улучшенная обработка броска костей с автоматическими модификаторами"""
     notation = data.get("notation", "").strip()
     if not notation:
         return
 
     try:
-        # ✅ ИСПРАВЛЕНО: Используем правильный метод roll_from_notation
         from app.services.dice_service import dice_service
-        dice_result = dice_service.roll_from_notation(notation)
 
-        # ✅ ИСПРАВЛЕНО: Преобразуем DiceResult в dict для JSON
+        # Проверяем, есть ли ожидающая проверка для добавления модификатора
+        pending_check = await get_pending_roll_check(game_id, character_name)
+
+        if pending_check and notation == "1d20":
+            # Для проверок навыков бросаем только d20, модификатор добавим потом
+            dice_result = dice_service.roll_from_notation("1d20")
+        else:
+            # Для обычных бросков используем полную нотацию
+            dice_result = dice_service.roll_from_notation(notation)
+
+        # Преобразуем DiceResult в dict для JSON
         result_dict = {
-            "notation": dice_result.notation,
+            "notation": notation,
             "individual_rolls": dice_result.individual_rolls,
             "modifiers": dice_result.modifiers,
-            "total": dice_result.total,
+            "total": dice_result.total,  # Для проверок это будет только d20
             "is_critical": dice_result.is_critical,
-            "is_advantage": dice_result.is_advantage,
-            "is_disadvantage": dice_result.is_disadvantage,
-            "details": str(dice_result)
+            "is_fumble": dice_result.is_fumble,
+            "player_name": character_name,  # Используем имя персонажа
+            "timestamp": datetime.utcnow().isoformat()
         }
 
-        # Создаем сообщение о броске
-        dice_msg = WebSocketMessage("dice_roll", {
-            "notation": notation,
-            "result": result_dict,
-            "player_id": user_id,
-            "player_name": user.username,
-            "purpose": data.get("purpose", ""),
-            "timestamp": datetime.utcnow().isoformat()
-        })
+        # Отправляем результат броска
+        dice_message = WebSocketMessage("dice_roll", result_dict)
+        await manager.broadcast_to_game(dice_message.to_json(), game_id)
 
-        # Рассылаем всем игрокам
-        await manager.broadcast_to_game(dice_msg.to_json(), game_id)
-
-        # ✅ НОВОЕ: Проверяем, есть ли ожидающая проверка для этого игрока
-        pending_check = await get_pending_roll_check(game_id, user.username)
+        # Если это проверка навыка, обрабатываем результат
         if pending_check:
-            logger.info(f"Processing pending dice check for {user.username}")
+            await process_dice_check_result(game_id, character_name, result_dict, pending_check)
+            # Удаляем обработанную проверку
+            await clear_pending_roll_check(game_id, character_name)
 
-            # ✅ ИСПРАВЛЕНО: Передаем dict вместо DiceResult
-            await process_dice_check_result(game_id, user.username, result_dict, pending_check)
-
-            # Удаляем ожидающую проверку
-            await clear_pending_roll_check(game_id, user.username)
-        else:
-            logger.info(f"No pending check found for {user.username}, this was a regular dice roll")
+        logger.info(f"Dice roll by {character_name}: {notation} = {dice_result.total}")
 
     except Exception as e:
-        logger.error(f"Error rolling dice: {e}", exc_info=True)
-        error_msg = WebSocketMessage("error", {"message": f"Failed to roll dice: {str(e)}"})
+        logger.error(f"Error handling dice roll: {e}")
+        error_msg = WebSocketMessage("error", {
+            "message": f"Ошибка при броске {notation}: {str(e)}",
+            "timestamp": datetime.utcnow().isoformat()
+        })
         await websocket.send_text(error_msg.to_json())
 
 
-async def process_dice_check_result(game_id: str, player_name: str, roll_result: dict, pending_check: dict):
+async def process_dice_check_result(game_id: str, character_name: str, roll_result: Dict, pending_check: Dict):
     """Обработка результата проверки кубиками (улучшенная версия)"""
     try:
         dc = pending_check.get("dc", 15)
         original_action = pending_check.get("original_action", "unknown action")
         roll_type = pending_check.get("roll_type", "skill_check")
-        skill_display = pending_check.get("skill_display", "навык")
+        skill_display = pending_check.get("ability_or_skill", "навык").title()
         modifier = pending_check.get("modifier", 0)
+        character_info = pending_check.get("character_info")
 
         # Получаем базовый результат броска (без модификатора)
         base_roll = roll_result.get("total", 0)
 
-        # ✅ ИСПРАВЛЕНО: Автоматически добавляем модификатор
+        # Автоматически добавляем модификатор
         final_total = base_roll + modifier
         success = final_total >= dc
 
         # Формируем контекст для ИИ
         context = {
-            "player_name": player_name,
+            "player_name": character_name,
             "original_action": original_action,
             "roll_type": roll_type,
             "skill_display": skill_display,
@@ -1021,7 +629,7 @@ async def process_dice_check_result(game_id: str, player_name: str, roll_result:
             "current_scene": "Проверка навыка/характеристики"
         }
 
-        # ✅ Используем специальный метод для генерации ответа на бросок
+        # Используем специальный метод для генерации ответа на бросок
         ai_response = await ai_service.generate_dice_result_response(
             action=original_action,
             roll_result={
@@ -1032,7 +640,7 @@ async def process_dice_check_result(game_id: str, player_name: str, roll_result:
                 "skill": skill_display
             },
             dc=dc,
-            character_name=player_name,
+            character_name=character_name,
             game_context=context
         )
 
@@ -1042,9 +650,9 @@ async def process_dice_check_result(game_id: str, player_name: str, roll_result:
             roll_text = f"[{base_roll}{modifier_text} = {final_total}]"
 
             if success:
-                ai_response = f"🎯 **{player_name}** успешно выполняет {original_action}! {roll_text}\n\nЧто вы делаете дальше?"
+                ai_response = f"🎯 **{character_name}** успешно выполняет {original_action}! {roll_text}\n\nЧто вы делаете дальше?"
             else:
-                ai_response = f"❌ **{player_name}** терпит неудачу в попытке {original_action}. {roll_text}\n\nКак вы отреагируете на неудачу?"
+                ai_response = f"❌ **{character_name}** терпит неудачу в попытке {original_action}. {roll_text}\n\nКак вы отреагируете на неудачу?"
 
         # Отправляем результат проверки
         check_result_msg = WebSocketMessage("dice_check_result", {
@@ -1057,18 +665,73 @@ async def process_dice_check_result(game_id: str, player_name: str, roll_result:
             "dc": dc,
             "success": success,
             "original_action": original_action,
-            "player_name": player_name,
+            "player_name": character_name,
             "skill_display": skill_display,
             "is_dice_check_result": True
         })
 
         await manager.broadcast_to_game(check_result_msg.to_json(), game_id)
-        logger.info(f"Dice check result for {player_name}: {skill_display} {base_roll}+{modifier}={final_total} vs DC{dc} = {'SUCCESS' if success else 'FAILURE'}")
+        logger.info(f"Dice check result for {character_name}: {skill_display} {base_roll}+{modifier}={final_total} vs DC{dc} = {'SUCCESS' if success else 'FAILURE'}")
 
     except Exception as e:
         logger.error(f"Error processing dice check result: {e}", exc_info=True)
 
 
+async def send_fallback_ai_response(game_id: str, player_action: str, character_name: str):
+    """Отправить запасной ответ ИИ если основной сервис недоступен"""
+    fallback_response = f"🤖 *ИИ Мастер временно недоступен, но игра продолжается!*\n\n" \
+                        f"*{character_name} выполняет действие: {player_action}*\n\n" \
+                        f"Что вы делаете дальше?"
+
+    fallback_msg = WebSocketMessage("ai_response", {
+        "message": fallback_response,
+        "sender_name": "ИИ Мастер (оффлайн)",
+        "timestamp": datetime.utcnow().isoformat(),
+        "in_response_to": player_action,
+        "is_fallback": True
+    })
+
+    try:
+        await manager.broadcast_to_game(fallback_msg.to_json(), game_id)
+        logger.info(f"Sent fallback AI response for {character_name}")
+    except Exception as e:
+        logger.error(f"Failed to send fallback AI response: {e}")
+
+
+# Функции для работы с ожидающими проверками кубиков
+async def save_pending_roll_check(game_id: str, character_name: str, check_data: Dict):
+    """Сохранить информацию об ожидающей проверке"""
+    try:
+        key = f"pending_roll:{game_id}:{character_name}"
+        await redis_client.setex(key, 300, json.dumps(check_data))  # 5 минут TTL
+        logger.debug(f"Saved pending roll check for {character_name} in game {game_id}")
+    except Exception as e:
+        logger.error(f"Error saving pending roll check: {e}")
+
+
+async def get_pending_roll_check(game_id: str, character_name: str) -> Optional[Dict]:
+    """Получить информацию об ожидающей проверке"""
+    try:
+        key = f"pending_roll:{game_id}:{character_name}"
+        data = await redis_client.get(key)
+        if data:
+            return json.loads(data)
+    except Exception as e:
+        logger.error(f"Error getting pending roll check: {e}")
+    return None
+
+
+async def clear_pending_roll_check(game_id: str, character_name: str):
+    """Удалить информацию об ожидающей проверке"""
+    try:
+        key = f"pending_roll:{game_id}:{character_name}"
+        await redis_client.delete(key)
+        logger.debug(f"Cleared pending roll check for {character_name} in game {game_id}")
+    except Exception as e:
+        logger.error(f"Error clearing pending roll check: {e}")
+
+
+# Утилитарные функции для описаний
 def get_roll_type_description(roll_type: str) -> str:
     """Получить описание типа броска"""
     descriptions = {
@@ -1083,32 +746,59 @@ def get_roll_type_description(roll_type: str) -> str:
     }
     return descriptions.get(roll_type, "Проверка")
 
+
 def get_ability_description(ability: str) -> str:
     """Получить описание характеристики/навыка"""
     descriptions = {
         "атлетика": "Атлетика (Сила)",
         "восприятие": "Восприятие (Мудрость)",
-        "расследование": "Расследование (Интеллект)",
         "скрытность": "Скрытность (Ловкость)",
         "убеждение": "Убеждение (Харизма)",
         "обман": "Обман (Харизма)",
+        "запугивание": "Запугивание (Харизма)",
         "проницательность": "Проницательность (Мудрость)",
-        "ловкость": "Ловкость",
+        "расследование": "Расследование (Интеллект)",
+        "медицина": "Медицина (Мудрость)",
+        "природа": "Природа (Интеллект)",
+        "религия": "Религия (Интеллект)",
+        "магия": "Магия (Интеллект)",
+        "история": "История (Интеллект)",
+        "выживание": "Выживание (Мудрость)",
+        "обращение_с_животными": "Обращение с животными (Мудрость)",
+        "акробатика": "Акробатика (Ловкость)",
+        "ловкость_рук": "Ловкость рук (Ловкость)",
+        "выступление": "Выступление (Харизма)",
+
+        # Основные характеристики
         "сила": "Сила",
+        "ловкость": "Ловкость",
         "телосложение": "Телосложение",
         "интеллект": "Интеллект",
         "мудрость": "Мудрость",
         "харизма": "Харизма",
-        # Английские варианты
+
+        # English versions
         "athletics": "Атлетика (Сила)",
         "perception": "Восприятие (Мудрость)",
-        "investigation": "Расследование (Интеллект)",
         "stealth": "Скрытность (Ловкость)",
         "persuasion": "Убеждение (Харизма)",
         "deception": "Обман (Харизма)",
+        "intimidation": "Запугивание (Харизма)",
         "insight": "Проницательность (Мудрость)",
-        "dexterity": "Ловкость",
+        "investigation": "Расследование (Интеллект)",
+        "medicine": "Медицина (Мудрость)",
+        "nature": "Природа (Интеллект)",
+        "religion": "Религия (Интеллект)",
+        "arcana": "Магия (Интеллект)",
+        "history": "История (Интеллект)",
+        "survival": "Выживание (Мудрость)",
+        "animal_handling": "Обращение с животными (Мудрость)",
+        "acrobatics": "Акробатика (Ловкость)",
+        "sleight_of_hand": "Ловкость рук (Ловкость)",
+        "performance": "Выступление (Харизма)",
+
         "strength": "Сила",
+        "dexterity": "Ловкость",
         "constitution": "Телосложение",
         "intelligence": "Интеллект",
         "wisdom": "Мудрость",
@@ -1117,296 +807,170 @@ def get_ability_description(ability: str) -> str:
     return descriptions.get(ability.lower(), ability.title())
 
 
-# Функции для работы с Redis (хранение ожидающих проверок)
-async def store_pending_roll_check(game_id: str, player_name: str, check_data: dict, original_action: str):
-    """Сохранить ожидающую проверку в Redis"""
-    try:
-        key = f"pending_roll:{game_id}:{player_name}"
-        data = {
-            **check_data,
-            "original_action": original_action,
-            "timestamp": datetime.utcnow().isoformat()
-        }
-        # ✅ ИСПРАВЛЕНО: Используем правильный метод Redis клиента
-        success = await redis_client.set_with_expiry(key, data, 300)  # 5 минут
-        if success:
-            logger.info(f"Stored pending roll check for {player_name} in game {game_id}")
-        else:
-            logger.error(f"Failed to store pending roll check for {player_name}")
-        return success
-    except Exception as e:
-        logger.error(f"Error storing pending roll check: {e}")
-        return False
+def get_skill_modifier(skill: str, character_name: str) -> int:
+    """
+    Получить модификатор навыка для персонажа
+    Временная функция - в реальности должна получать данные из БД
+    """
+    # Временная заглушка - возвращает случайный модификатор
+    # В реальности должна вычислять на основе характеристик персонажа
+    import random
+    return random.randint(-1, 5)
 
 
-async def get_pending_roll_check(game_id: str, player_name: str) -> dict:
-    """Получить ожидающую проверку из Redis"""
-    try:
-        key = f"pending_roll:{game_id}:{player_name}"
-        # ✅ ИСПРАВЛЕНО: Используем исправленный метод get_json
-        result = await redis_client.get_json(key)
-        logger.info(f"Retrieved pending roll check for {player_name}: {result is not None}")
-        return result
-    except Exception as e:
-        logger.error(f"Error getting pending roll check: {e}")
-        return None
-
-
-async def clear_pending_roll_check(game_id: str, player_name: str):
-    """Удалить ожидающую проверку из Redis"""
-    try:
-        key = f"pending_roll:{game_id}:{player_name}"
-        success = await redis_client.delete(key)
-        if success:
-            logger.info(f"Cleared pending roll check for {player_name}")
-        else:
-            logger.warning(f"No pending roll check found to clear for {player_name}")
-        return success
-    except Exception as e:
-        logger.error(f"Error clearing pending roll check: {e}")
-        return False
-
-
-async def send_fallback_ai_response(game_id: str, player_action: str, player_name: str):
-    """Отправить резервный ответ ИИ"""
-    fallback_response = f"🤖 *ИИ Мастер временно недоступен. {player_name}, продолжайте игру! Что делаете дальше?*"
-
-    fallback_msg = WebSocketMessage("ai_response", {
-        "message": fallback_response,
-        "sender_name": "ИИ Мастер (оффлайн)",
-        "timestamp": datetime.utcnow().isoformat(),
-        "in_response_to": player_action,
-        "is_fallback": True
-    })
+# Дополнительные WebSocket endpoints для административных функций
+@router.websocket("/admin/{game_id}")
+async def websocket_admin_endpoint(
+        websocket: WebSocket,
+        game_id: str,
+        token: str = Query(...),
+        db: AsyncSession = Depends(get_db_session)
+):
+    """WebSocket endpoint для администраторов игры (ДМ)"""
+    user = None
 
     try:
-        await manager.broadcast_to_game(fallback_msg.to_json(), game_id)
-        logger.info(f"Sent fallback AI response for {player_name}")
-    except Exception as e:
-        logger.error(f"Failed to send fallback AI response: {e}")
+        # Аутентификация пользователя
+        user = await get_user_from_token(token, db)
+        if not user:
+            await websocket.close(code=1008, reason="Invalid token")
+            return
 
-async def handle_dice_roll(websocket: WebSocket, game_id: str, user_id: str, user: User, data: Dict[str, Any], db: AsyncSession):
-    """Улучшенная обработка броска костей с автоматическими модификаторами"""
-    notation = data.get("notation", "").strip()
-    if not notation:
-        return
-
-    try:
-        from app.services.dice_service import dice_service
-
-        # Проверяем, есть ли ожидающая проверка для добавления модификатора
-        pending_check = await get_pending_roll_check(game_id, user.username)
-
-        if pending_check and notation == "1d20":
-            # ✅ Для проверок навыков бросаем только d20, модификатор добавим потом
-            dice_result = dice_service.roll_from_notation("1d20")
-        else:
-            # Для обычных бросков используем полную нотацию
-            dice_result = dice_service.roll_from_notation(notation)
-
-        # Преобразуем DiceResult в dict для JSON
-        result_dict = {
-            "notation": notation,
-            "individual_rolls": dice_result.individual_rolls,
-            "modifiers": dice_result.modifiers,
-            "total": dice_result.total,  # Для проверок это будет только d20
-            "is_critical": dice_result.is_critical,
-            "is_advantage": dice_result.is_advantage,
-            "is_disadvantage": dice_result.is_disadvantage,
-            "details": str(dice_result)
-        }
-
-        # Создаем сообщение о броске
-        if pending_check:
-            # Для проверок показываем только базовый бросок
-            dice_msg = WebSocketMessage("dice_roll", {
-                "notation": notation,
-                "result": result_dict,
-                "player_id": user_id,
-                "player_name": user.username,
-                "purpose": f"Проверка {pending_check.get('skill_display', 'навыка')}",
-                "timestamp": datetime.utcnow().isoformat(),
-                "is_skill_check": True
-            })
-        else:
-            # Обычный бросок
-            dice_msg = WebSocketMessage("dice_roll", {
-                "notation": notation,
-                "result": result_dict,
-                "player_id": user_id,
-                "player_name": user.username,
-                "purpose": data.get("purpose", ""),
-                "timestamp": datetime.utcnow().isoformat(),
-                "is_skill_check": False
-            })
-
-        # Рассылаем всем игрокам
-        await manager.broadcast_to_game(dice_msg.to_json(), game_id)
-
-        # Обрабатываем результат проверки если есть ожидающая
-        if pending_check:
-            logger.info(f"Processing pending dice check for {user.username}")
-            await process_dice_check_result(game_id, user.username, result_dict, pending_check)
-            await clear_pending_roll_check(game_id, user.username)
-        else:
-            logger.info(f"Regular dice roll by {user.username}: {notation}")
-
-    except Exception as e:
-        logger.error(f"Error rolling dice: {e}", exc_info=True)
-        error_msg = WebSocketMessage("error", {"message": f"Failed to roll dice: {str(e)}"})
-        await websocket.send_text(error_msg.to_json())
-
-
-# HTTP endpoints для управления WebSocket соединениями
-@router.get("/active-games")
-async def get_active_games():
-    """Получить список активных игр"""
-    return {
-        "active_games": list(manager.active_connections.keys()),
-        "total_players": len(manager.user_games)
-    }
-
-
-@router.get("/game/{game_id}/players")
-async def get_game_players(game_id: str):
-    """Получить список игроков в игре"""
-    players = manager.get_game_players(game_id)
-    return {
-        "game_id": game_id,
-        "players": players,
-        "player_count": len(players)
-    }
-async def handle_request_game_state(websocket: WebSocket, game_id: str, user_id: str, user: User, data: Dict[str, Any], db: AsyncSession):
-    """Отправка текущего состояния игры"""
-    try:
-        # Получаем игру из базы данных
-        from app.models.game import Game
-        from sqlalchemy import select
-
-        game_query = select(Game).where(Game.id == game_id)
-        result = await db.execute(game_query)
+        # Проверяем права администратора
+        query = select(Game).join(Campaign).where(
+            Game.id == game_id,
+            Campaign.creator_id == user.id
+        )
+        result = await db.execute(query)
         game = result.scalar_one_or_none()
 
         if not game:
-            error_msg = WebSocketMessage("error", {"message": "Game not found"})
-            await websocket.send_text(error_msg.to_json())
+            await websocket.close(code=1008, reason="Access denied")
             return
 
-        # Отправляем состояние игры
-        game_state_msg = WebSocketMessage("game_state_update", {
-            "game_id": str(game.id),
-            "game_name": game.name,
-            "current_scene": {
-                "description": game.current_scene or "Мастер готовит новое приключение для вашей партии. Скоро начнется увлекательное путешествие! Ваша группа собралась в уютной таверне, обсуждая предстоящие дела.",
-                "location": "Таверна 'Дракон и Дева'",
-                "weather": "Прохладный вечер",
-                "time_of_day": "Вечер",
-                "atmosphere": "В таверне слышен смех и звон кружек. Камин потрескивает, создавая уютную атмосферу. Бардец в углу наигрывает веселую мелодию."
-            },
-            "players_online": manager.get_game_players(game_id),
-            "timestamp": datetime.utcnow().isoformat()
-        })
+        await websocket.accept()
 
-        await websocket.send_text(game_state_msg.to_json())
+        # Отправляем административную информацию
+        admin_info = {
+            "connected_players": manager.get_connected_users(game_id),
+            "game_status": game.status.value,
+            "total_players": game.current_players,
+            "session_duration": game.session_duration
+        }
 
-        # Также отправляем историю сообщений
-        await handle_request_message_history(websocket, game_id, user_id, user, {"limit": 20}, db)
+        admin_message = WebSocketMessage("admin_info", admin_info)
+        await websocket.send_text(admin_message.to_json())
+
+        # Основной цикл для административных команд
+        while True:
+            try:
+                data = await websocket.receive_text()
+                message_data = json.loads(data)
+                command = message_data.get("command")
+
+                if command == "kick_player":
+                    player_id = message_data.get("player_id")
+                    await handle_kick_player(game_id, player_id, db)
+                elif command == "pause_game":
+                    await handle_pause_game(game_id, db)
+                elif command == "resume_game":
+                    await handle_resume_game(game_id, db)
+                elif command == "broadcast_message":
+                    message = message_data.get("message", "")
+                    await handle_dm_broadcast(game_id, message, user.username)
+                else:
+                    logger.warning(f"Unknown admin command: {command}")
+
+            except WebSocketDisconnect:
+                break
+            except Exception as e:
+                logger.error(f"Error handling admin command: {e}")
 
     except Exception as e:
-        logger.error(f"Error sending game state: {e}")
-        error_msg = WebSocketMessage("error", {"message": "Failed to get game state"})
-        await websocket.send_text(error_msg.to_json())
+        logger.error(f"Admin WebSocket error for game {game_id}: {e}")
+    finally:
+        if user:
+            logger.info(f"Admin {user.username} disconnected from game {game_id}")
 
 
-async def handle_request_message_history(websocket: WebSocket, game_id: str, user_id: str, user: User, data: Dict[str, Any], db: AsyncSession):
-    """Отправка истории сообщений"""
+async def handle_kick_player(game_id: str, player_id: str, db: AsyncSession):
+    """Исключить игрока из игры"""
     try:
-        limit = data.get("limit", 50)
+        # Отключаем WebSocket соединение
+        await manager.disconnect(game_id, player_id)
 
-        # Получаем историю из Redis или создаем тестовые сообщения
-        try:
-            messages = await redis_client.get_game_messages(game_id, limit)
-        except:
-            messages = []
+        # Отправляем сообщение об исключении
+        kick_message = WebSocketMessage("system", {
+            "message": f"Игрок был исключен из игры",
+            "kicked_player_id": player_id,
+            "timestamp": datetime.utcnow().isoformat()
+        })
+        await manager.broadcast_to_game(kick_message.to_json(), game_id)
 
-        if not messages:
-            # Создаем начальное сообщение от ИИ мастера
-            messages = [{
-                "id": "initial-dm-message",
-                "type": "ai_dm",
-                "content": "🎲 Добро пожаловать в мир приключений! Ваша партия собралась в уютной таверне 'Дракон и Дева'. За окном начинает темнеть, а в камине весело потрескивают дрова. Трактирщик подает вам кружки эля и спрашивает о ваших планах. Что вы хотите делать?",
-                "sender_name": "ИИ Мастер",
+        logger.info(f"Player {player_id} kicked from game {game_id}")
+    except Exception as e:
+        logger.error(f"Error kicking player: {e}")
+
+
+async def handle_pause_game(game_id: str, db: AsyncSession):
+    """Приостановить игру"""
+    try:
+        query = select(Game).where(Game.id == game_id)
+        result = await db.execute(query)
+        game = result.scalar_one_or_none()
+
+        if game and game.pause_game():
+            await db.commit()
+
+            pause_message = WebSocketMessage("system", {
+                "message": "🔸 Игра приостановлена Данжеон Мастером",
+                "game_status": "paused",
                 "timestamp": datetime.utcnow().isoformat()
-            }]
+            })
+            await manager.broadcast_to_game(pause_message.to_json(), game_id)
 
-        history_msg = WebSocketMessage("message_history", {
-            "messages": messages,
-            "total_count": len(messages),
-            "timestamp": datetime.utcnow().isoformat()
-        })
-
-        await websocket.send_text(history_msg.to_json())
-
+        logger.info(f"Game {game_id} paused")
     except Exception as e:
-        logger.error(f"Error sending message history: {e}")
-        error_msg = WebSocketMessage("error", {"message": "Failed to get message history"})
-        await websocket.send_text(error_msg.to_json())
+        logger.error(f"Error pausing game: {e}")
 
 
-async def handle_request_scene_info(websocket: WebSocket, game_id: str, user_id: str, user: User, data: Dict[str, Any], db: AsyncSession):
-    """Отправка информации о текущей сцене"""
+async def handle_resume_game(game_id: str, db: AsyncSession):
+    """Возобновить игру"""
     try:
-        # Получаем игру из базы данных
-        from app.models.game import Game
-        from sqlalchemy import select
-
-        game_query = select(Game).where(Game.id == game_id)
-        result = await db.execute(game_query)
+        query = select(Game).where(Game.id == game_id)
+        result = await db.execute(query)
         game = result.scalar_one_or_none()
 
-        if not game:
-            error_msg = WebSocketMessage("error", {"message": "Game not found"})
-            await websocket.send_text(error_msg.to_json())
-            return
+        if game and game.resume_game():
+            await db.commit()
 
-        scene_msg = WebSocketMessage("scene_update", {
-            "description": game.current_scene or "Мастер готовит новое приключение для вашей партии. Скоро начнется увлекательное путешествие! Ваша группа собралась в уютной таверне, планируя предстоящие дела и наслаждаясь теплой атмосферой.",
-            "location": "Таверна 'Дракон и Дева'",
-            "weather": "Прохладный вечер",
-            "time_of_day": "Вечер",
-            "atmosphere": "В таверне слышен смех и звон кружек. Камин потрескивает, создавая уютную атмосферу. Свечи на столах мерцают, освещая лица собравшихся искателей приключений.",
-            "timestamp": datetime.utcnow().isoformat()
-        })
+            resume_message = WebSocketMessage("system", {
+                "message": "▶️ Игра возобновлена Данжеон Мастером",
+                "game_status": "active",
+                "timestamp": datetime.utcnow().isoformat()
+            })
+            await manager.broadcast_to_game(resume_message.to_json(), game_id)
 
-        await websocket.send_text(scene_msg.to_json())
-
+        logger.info(f"Game {game_id} resumed")
     except Exception as e:
-        logger.error(f"Error sending scene info: {e}")
-        error_msg = WebSocketMessage("error", {"message": "Failed to get scene info"})
-        await websocket.send_text(error_msg.to_json())
+        logger.error(f"Error resuming game: {e}")
 
 
-# Также обновите функцию send_initial_data, которая вызывается при подключении:
-async def send_initial_data(websocket: WebSocket, game_id: str, user_id: str, user: User, db: AsyncSession):
-    """Отправка начальных данных при подключении к игре"""
+async def handle_dm_broadcast(game_id: str, message: str, dm_name: str):
+    """Отправить сообщение от ДМ всем игрокам"""
     try:
-        # Отправляем приветственное сообщение о подключении
-        welcome_msg = WebSocketMessage("connected", {
-            "game_id": game_id,
-            "game_name": "Игровая сессия",
-            "user_id": user_id,
-            "username": user.username,
-            "players_online": manager.get_game_players(game_id),
-            "message": f"{user.username} присоединился к игре!",
-            "timestamp": datetime.utcnow().isoformat()
+        dm_message = WebSocketMessage("dm_broadcast", {
+            "message": f"📢 **Объявление от ДМ ({dm_name}):**\n\n{message}",
+            "sender_name": f"ДМ {dm_name}",
+            "timestamp": datetime.utcnow().isoformat(),
+            "is_dm_message": True
         })
+        await manager.broadcast_to_game(dm_message.to_json(), game_id)
 
-        await websocket.send_text(welcome_msg.to_json())
-
-        # Автоматически отправляем текущее состояние игры
-        await handle_request_game_state(websocket, game_id, user_id, user, {}, db)
-
+        logger.info(f"DM broadcast sent in game {game_id}")
     except Exception as e:
-        logger.error(f"Error sending initial data: {e}")
-        error_msg = WebSocketMessage("error", {"message": "Failed to send initial data"})
-        await websocket.send_text(error_msg.to_json())
+        logger.error(f"Error sending DM broadcast: {e}")
+
+
+# Экспорт менеджера для использования в других модулях
+__all__ = ["manager", "WebSocketMessage"]
