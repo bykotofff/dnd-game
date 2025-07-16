@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
-import { useMutation } from 'react-query';
+import { useMutation } from '@tanstack/react-query';
 import { toast } from 'react-hot-toast';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -55,499 +55,368 @@ const AI_STYLES = [
         icon: '😄'
     },
     {
-        id: 'dramatic',
-        name: 'Драматический',
-        description: 'Глубокие эмоции и сложные моральные дилеммы',
-        icon: '🎬'
+        id: 'dark',
+        name: 'Мрачный',
+        description: 'Серьезная и напряженная атмосфера',
+        icon: '🌙'
     },
+    {
+        id: 'heroic',
+        name: 'Героический',
+        description: 'Классические героические приключения',
+        icon: '⚔️'
+    }
 ];
 
 const CreateCampaignPage: React.FC = () => {
     const navigate = useNavigate();
     const [currentStep, setCurrentStep] = useState(1);
     const [selectedSetting, setSelectedSetting] = useState('');
-    const [selectedAiStyle, setSelectedAiStyle] = useState('balanced');
+    const [selectedStyle, setSelectedStyle] = useState('');
 
-    const {
-        register,
-        watch,
-        setValue,
-        trigger, // ✅ Добавляем trigger для валидации отдельных шагов
-        formState: { errors },
-    } = useForm<FormData>({
+    const { register, handleSubmit, watch, setValue, formState: { errors, isValid } } = useForm<FormData>({
+        mode: 'onChange',
         defaultValues: {
-            max_players: 4,
-            starting_level: 1,
-            ai_style: 'balanced',
             is_public: false,
-            requires_approval: true,
+            max_players: 4,
+            setting: '',
+            ai_style: 'balanced',
+            allow_homebrew: true,
+        }
+    });
+
+    // Исправлено для TanStack Query v5
+    const createMutation = useMutation({
+        mutationFn: (data: CreateCampaignData) => campaignService.createCampaign(data),
+        onSuccess: (campaign) => {
+            toast.success('Кампания создана!');
+            navigate(`/campaigns/${campaign.id}`);
+        },
+        onError: (error: any) => {
+            toast.error(error.response?.data?.detail || 'Ошибка при создании кампании');
         },
     });
 
-    const createMutation = useMutation(
-        (data: CreateCampaignData) => campaignService.createCampaign(data),
-        {
-            onSuccess: (campaign) => {
-                toast.success('Кампания успешно создана!');
-                navigate(`/campaigns/${campaign.id}`);
-            },
-            onError: (error: any) => {
-                console.error('Create campaign error:', error);
-                const errorMessage = error.response?.data?.detail || 'Ошибка при создании кампании';
-                toast.error(errorMessage);
-            },
-        }
-    );
+    const onSubmit = (data: FormData) => {
+        const formData = {
+            ...data,
+            setting: selectedSetting,
+            ai_style: selectedStyle,
+        };
+        createMutation.mutate(formData);
+    };
 
-    // ✅ ИСПРАВЛЕННАЯ ФУНКЦИЯ: Переход на следующий шаг с валидацией
-    const nextStep = async () => {
-        if (currentStep >= 4) return;
-
-        let fieldsToValidate: string[] = [];
-        let isValid = true;
-
-        switch (currentStep) {
-            case 1:
-                fieldsToValidate = ['name', 'description'];
-                isValid = await trigger(fieldsToValidate);
-                if (!isValid) {
-                    toast.error('Заполните название и описание кампании');
-                    return;
-                }
-                break;
-
-            case 2:
-                if (!selectedSetting) {
-                    toast.error('Выберите сеттинг для продолжения');
-                    return;
-                }
-                break;
-
-            case 3:
-                fieldsToValidate = ['max_players', 'starting_level'];
-                isValid = await trigger(fieldsToValidate);
-                if (!selectedAiStyle) {
-                    toast.error('Выберите стиль ИИ для продолжения');
-                    return;
-                }
-                if (!isValid) {
-                    toast.error('Проверьте настройки игры');
-                    return;
-                }
-                break;
-        }
-
-        setCurrentStep(currentStep + 1);
+    const nextStep = () => {
+        if (currentStep < 3) setCurrentStep(currentStep + 1);
     };
 
     const prevStep = () => {
-        if (currentStep > 1) {
-            setCurrentStep(currentStep - 1);
-        }
+        if (currentStep > 1) setCurrentStep(currentStep - 1);
     };
 
-    // ✅ НОВАЯ ФУНКЦИЯ: Финальное создание кампании
-    const handleCreateCampaign = async () => {
-        // Получаем все данные формы
-        const formData = watch();
-
-        // Финальная валидация
-        if (!formData.name?.trim()) {
-            toast.error('Введите название кампании');
-            return;
+    const isStepValid = () => {
+        switch (currentStep) {
+            case 1:
+                return watch('name') && watch('description');
+            case 2:
+                return selectedSetting;
+            case 3:
+                return selectedStyle;
+            default:
+                return false;
         }
-
-        if (!selectedSetting) {
-            toast.error('Выберите сеттинг');
-            return;
-        }
-
-        // Валидируем все поля
-        const isValid = await trigger();
-        if (!isValid) {
-            toast.error('Проверьте заполнение всех полей');
-            return;
-        }
-
-        const campaignData: CreateCampaignData = {
-            ...formData,
-            setting: selectedSetting,
-            ai_style: selectedAiStyle,
-        };
-
-        createMutation.mutate(campaignData);
     };
-
-    const steps = [
-        { id: 1, name: 'Основная информация', icon: BookOpenIcon },
-        { id: 2, name: 'Сеттинг и мир', icon: GlobeAltIcon },
-        { id: 3, name: 'ИИ и настройки', icon: SparklesIcon },
-        { id: 4, name: 'Игроки и доступ', icon: UserGroupIcon },
-    ];
-
-    const currentStepData = steps.find(step => step.id === currentStep);
 
     return (
-        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-            {/* Header */}
+        <div className="max-w-4xl mx-auto p-6">
             <div className="mb-8">
-                <button
-                    onClick={() => navigate('/campaigns')}
-                    className="flex items-center text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white mb-4"
-                >
-                    <ArrowLeftIcon className="w-4 h-4 mr-2" />
-                    Назад к кампаниям
-                </button>
-                <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
+                <div className="flex items-center gap-4 mb-6">
+                    <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => navigate('/campaigns')}
+                    >
+                        <ArrowLeftIcon className="w-4 h-4 mr-2" />
+                        Назад к кампаниям
+                    </Button>
+                </div>
+
+                <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">
                     Создание новой кампании
                 </h1>
-                <p className="text-gray-600 dark:text-gray-400 mt-2">
-                    Создайте уникальный мир для своих приключений
+                <p className="text-gray-600 dark:text-gray-400">
+                    Настройте свою кампанию в несколько простых шагов
                 </p>
-            </div>
 
-            {/* Progress Steps */}
-            <div className="mb-8">
-                <div className="flex items-center justify-between">
-                    {steps.map((step, index) => (
-                        <React.Fragment key={step.id}>
-                            <div className="flex flex-col items-center">
-                                <div className={`flex items-center justify-center w-10 h-10 rounded-full border-2 ${
-                                    currentStep >= step.id
-                                        ? 'bg-amber-600 border-amber-600 text-white'
-                                        : 'border-gray-300 text-gray-400 dark:border-gray-600 dark:text-gray-500'
-                                }`}>
-                                    {currentStep > step.id ? (
-                                        <CheckIcon className="w-5 h-5" />
-                                    ) : (
-                                        <step.icon className="w-5 h-5" />
-                                    )}
-                                </div>
-                                <span className={`mt-2 text-sm font-medium ${
-                                    currentStep >= step.id
-                                        ? 'text-amber-600 dark:text-amber-400'
-                                        : 'text-gray-500 dark:text-gray-400'
-                                }`}>
-                                    {step.name}
-                                </span>
-                            </div>
-                            {index < steps.length - 1 && (
-                                <div className={`flex-1 h-0.5 mx-4 ${
-                                    currentStep > step.id
-                                        ? 'bg-amber-600'
-                                        : 'bg-gray-300 dark:bg-gray-600'
-                                }`} />
-                            )}
-                        </React.Fragment>
-                    ))}
+                {/* Progress Bar */}
+                <div className="mt-8 mb-8">
+                    <div className="flex items-center justify-between mb-2">
+                        <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                            Шаг {currentStep} из 3
+                        </span>
+                        <span className="text-sm text-gray-500">
+                            {Math.round((currentStep / 3) * 100)}% завершено
+                        </span>
+                    </div>
+                    <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                        <motion.div
+                            className="bg-blue-600 h-2 rounded-full"
+                            initial={{ width: '33%' }}
+                            animate={{ width: `${(currentStep / 3) * 100}%` }}
+                            transition={{ duration: 0.3 }}
+                        />
+                    </div>
                 </div>
             </div>
 
-            {/* ✅ ИСПРАВЛЕННЫЙ КОНТЕЙНЕР: убрали <form> чтобы предотвратить автоотправку */}
-            <div>
-                <Card>
-                    <CardHeader>
-                        <CardTitle className="flex items-center gap-2">
-                            {currentStepData?.icon && <currentStepData.icon className="w-5 h-5" />}
-                            {currentStepData?.name}
-                        </CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                        <AnimatePresence mode="wait">
-                            <motion.div
-                                key={currentStep}
-                                initial={{ opacity: 0, x: 20 }}
-                                animate={{ opacity: 1, x: 0 }}
-                                exit={{ opacity: 0, x: -20 }}
-                                transition={{ duration: 0.3 }}
-                            >
-                                {/* Step 1: Basic Information */}
-                                {currentStep === 1 && (
-                                    <div className="space-y-6">
+            <form onSubmit={handleSubmit(onSubmit)}>
+                <AnimatePresence mode="wait">
+                    {/* Step 1: Basic Information */}
+                    {currentStep === 1 && (
+                        <motion.div
+                            key="step1"
+                            initial={{ opacity: 0, x: 20 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            exit={{ opacity: 0, x: -20 }}
+                            transition={{ duration: 0.3 }}
+                        >
+                            <Card>
+                                <CardHeader>
+                                    <CardTitle className="flex items-center gap-2">
+                                        <BookOpenIcon className="w-6 h-6" />
+                                        Основная информация
+                                    </CardTitle>
+                                </CardHeader>
+                                <CardContent className="space-y-6">
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                            Название кампании*
+                                        </label>
+                                        <Input
+                                            {...register('name', { required: 'Название обязательно' })}
+                                            placeholder="Введите название кампании"
+                                            error={errors.name?.message}
+                                        />
+                                    </div>
+
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                            Описание*
+                                        </label>
+                                        <textarea
+                                            {...register('description', { required: 'Описание обязательно' })}
+                                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                            rows={4}
+                                            placeholder="Опишите вашу кампанию..."
+                                        />
+                                        {errors.description && (
+                                            <p className="text-red-500 text-sm mt-1">{errors.description.message}</p>
+                                        )}
+                                    </div>
+
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                         <div>
                                             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                                                Название кампании *
+                                                Максимум игроков
                                             </label>
                                             <Input
-                                                {...register('name', { required: 'Название обязательно' })}
-                                                placeholder="Например: Проклятье Стратольма"
-                                                error={errors.name?.message}
+                                                {...register('max_players', {
+                                                    required: 'Количество игроков обязательно',
+                                                    min: { value: 1, message: 'Минимум 1 игрок' },
+                                                    max: { value: 8, message: 'Максимум 8 игроков' }
+                                                })}
+                                                type="number"
+                                                min="1"
+                                                max="8"
+                                                error={errors.max_players?.message}
                                             />
                                         </div>
 
                                         <div>
                                             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                                                Описание
+                                                Тип кампании
                                             </label>
-                                            <textarea
-                                                {...register('description')}
-                                                rows={4}
-                                                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-amber-500 focus:border-amber-500 dark:bg-gray-700 dark:text-white"
-                                                placeholder="Краткое описание вашей кампании..."
-                                            />
-                                        </div>
-
-                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                            <div>
-                                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                                                    Максимум игроков
+                                            <div className="flex items-center space-x-4">
+                                                <label className="flex items-center">
+                                                    <input
+                                                        {...register('is_public')}
+                                                        type="radio"
+                                                        value="false"
+                                                        className="mr-2"
+                                                    />
+                                                    <LockClosedIcon className="w-4 h-4 mr-1" />
+                                                    Приватная
                                                 </label>
-                                                <Input
-                                                    {...register('max_players', {
-                                                        required: 'Укажите количество игроков',
-                                                        min: { value: 1, message: 'Минимум 1 игрок' },
-                                                        max: { value: 8, message: 'Максимум 8 игроков' }
-                                                    })}
-                                                    type="number"
-                                                    min="1"
-                                                    max="8"
-                                                    error={errors.max_players?.message}
-                                                />
-                                            </div>
-                                            <div>
-                                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                                                    Стартовый уровень
+                                                <label className="flex items-center">
+                                                    <input
+                                                        {...register('is_public')}
+                                                        type="radio"
+                                                        value="true"
+                                                        className="mr-2"
+                                                    />
+                                                    <GlobeAltIcon className="w-4 h-4 mr-1" />
+                                                    Публичная
                                                 </label>
-                                                <Input
-                                                    {...register('starting_level', {
-                                                        required: 'Укажите стартовый уровень',
-                                                        min: { value: 1, message: 'Минимальный уровень 1' },
-                                                        max: { value: 20, message: 'Максимальный уровень 20' }
-                                                    })}
-                                                    type="number"
-                                                    min="1"
-                                                    max="20"
-                                                    error={errors.starting_level?.message}
-                                                />
                                             </div>
                                         </div>
                                     </div>
-                                )}
+                                </CardContent>
+                            </Card>
+                        </motion.div>
+                    )}
 
-                                {/* Step 2: Setting and World */}
-                                {currentStep === 2 && (
-                                    <div className="space-y-6">
-                                        <div>
-                                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-4">
-                                                Выберите сеттинг
-                                            </label>
-                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                                {CAMPAIGN_SETTINGS.map((setting) => (
-                                                    <div
-                                                        key={setting.id}
-                                                        onClick={() => setSelectedSetting(setting.id)}
-                                                        className={`p-4 border-2 rounded-lg cursor-pointer transition-colors ${
-                                                            selectedSetting === setting.id
-                                                                ? 'border-amber-500 bg-amber-50 dark:bg-amber-900/20'
-                                                                : 'border-gray-200 dark:border-gray-600 hover:border-gray-300 dark:hover:border-gray-500'
-                                                        }`}
-                                                    >
-                                                        <h4 className="font-medium text-gray-900 dark:text-white">
-                                                            {setting.name}
-                                                        </h4>
-                                                        <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                                                            {setting.description}
-                                                        </p>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        </div>
-
-                                        <div>
-                                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                                                Описание мира
-                                            </label>
-                                            <textarea
-                                                {...register('world_description')}
-                                                rows={4}
-                                                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-amber-500 focus:border-amber-500 dark:bg-gray-700 dark:text-white"
-                                                placeholder="Опишите мир вашей кампании..."
-                                            />
-                                        </div>
-
-                                        <div>
-                                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                                                Основная история
-                                            </label>
-                                            <textarea
-                                                {...register('main_story')}
-                                                rows={4}
-                                                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-amber-500 focus:border-amber-500 dark:bg-gray-700 dark:text-white"
-                                                placeholder="Основная сюжетная линия..."
-                                            />
-                                        </div>
+                    {/* Step 2: Campaign Setting */}
+                    {currentStep === 2 && (
+                        <motion.div
+                            key="step2"
+                            initial={{ opacity: 0, x: 20 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            exit={{ opacity: 0, x: -20 }}
+                            transition={{ duration: 0.3 }}
+                        >
+                            <Card>
+                                <CardHeader>
+                                    <CardTitle className="flex items-center gap-2">
+                                        <CogIcon className="w-6 h-6" />
+                                        Настройки мира
+                                    </CardTitle>
+                                </CardHeader>
+                                <CardContent>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        {CAMPAIGN_SETTINGS.map((setting) => (
+                                            <motion.div
+                                                key={setting.id}
+                                                className={`p-4 border-2 rounded-lg cursor-pointer transition-all ${
+                                                    selectedSetting === setting.id
+                                                        ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
+                                                        : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
+                                                }`}
+                                                onClick={() => setSelectedSetting(setting.id)}
+                                                whileHover={{ scale: 1.02 }}
+                                                whileTap={{ scale: 0.98 }}
+                                            >
+                                                <h3 className="font-semibold text-gray-900 dark:text-white mb-1">
+                                                    {setting.name}
+                                                </h3>
+                                                <p className="text-sm text-gray-600 dark:text-gray-400">
+                                                    {setting.description}
+                                                </p>
+                                                {selectedSetting === setting.id && (
+                                                    <CheckIcon className="w-5 h-5 text-blue-600 mt-2" />
+                                                )}
+                                            </motion.div>
+                                        ))}
                                     </div>
-                                )}
+                                </CardContent>
+                            </Card>
+                        </motion.div>
+                    )}
 
-                                {/* Step 3: AI and Settings */}
-                                {currentStep === 3 && (
-                                    <div className="space-y-6">
-                                        <div>
-                                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-4">
-                                                Стиль ИИ-мастера
-                                            </label>
-                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                                {AI_STYLES.map((style) => (
-                                                    <div
-                                                        key={style.id}
-                                                        onClick={() => setSelectedAiStyle(style.id)}
-                                                        className={`p-4 border-2 rounded-lg cursor-pointer transition-colors ${
-                                                            selectedAiStyle === style.id
-                                                                ? 'border-amber-500 bg-amber-50 dark:bg-amber-900/20'
-                                                                : 'border-gray-200 dark:border-gray-600 hover:border-gray-300 dark:hover:border-gray-500'
-                                                        }`}
-                                                    >
-                                                        <div className="flex items-center gap-3">
-                                                            <span className="text-2xl">{style.icon}</span>
-                                                            <div>
-                                                                <h4 className="font-medium text-gray-900 dark:text-white">
-                                                                    {style.name}
-                                                                </h4>
-                                                                <p className="text-sm text-gray-600 dark:text-gray-400">
-                                                                    {style.description}
-                                                                </p>
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        </div>
-
-                                        <div>
-                                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                                                Личность ИИ-мастера
-                                            </label>
-                                            <textarea
-                                                {...register('ai_personality')}
-                                                rows={3}
-                                                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-amber-500 focus:border-amber-500 dark:bg-gray-700 dark:text-white"
-                                                placeholder="Опишите, каким должен быть ваш ИИ-мастер..."
-                                            />
-                                        </div>
-
-                                        <div>
-                                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                                                Домашние правила
-                                            </label>
-                                            <textarea
-                                                {...register('house_rules')}
-                                                rows={3}
-                                                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-amber-500 focus:border-amber-500 dark:bg-gray-700 dark:text-white"
-                                                placeholder="Особые правила для вашей кампании..."
-                                            />
-                                        </div>
-                                    </div>
-                                )}
-
-                                {/* ✅ Step 4: Players and Access - ЭТОТ ШАГ ТЕПЕРЬ ОТОБРАЖАЕТСЯ */}
-                                {currentStep === 4 && (
-                                    <div className="space-y-6">
-                                        <div className="space-y-4">
-                                            <div className="flex items-center justify-between p-4 border border-gray-200 dark:border-gray-600 rounded-lg">
-                                                <div className="flex items-center gap-3">
-                                                    <GlobeAltIcon className="w-5 h-5 text-green-500" />
-                                                    <div>
-                                                        <h4 className="font-medium text-gray-900 dark:text-white">
-                                                            Публичная кампания
-                                                        </h4>
-                                                        <p className="text-sm text-gray-600 dark:text-gray-400">
-                                                            Другие игроки смогут найти и присоединиться к кампании
-                                                        </p>
-                                                    </div>
+                    {/* Step 3: AI Style */}
+                    {currentStep === 3 && (
+                        <motion.div
+                            key="step3"
+                            initial={{ opacity: 0, x: 20 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            exit={{ opacity: 0, x: -20 }}
+                            transition={{ duration: 0.3 }}
+                        >
+                            <Card>
+                                <CardHeader>
+                                    <CardTitle className="flex items-center gap-2">
+                                        <SparklesIcon className="w-6 h-6" />
+                                        Стиль ИИ ведущего
+                                    </CardTitle>
+                                </CardHeader>
+                                <CardContent>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                                        {AI_STYLES.map((style) => (
+                                            <motion.div
+                                                key={style.id}
+                                                className={`p-4 border-2 rounded-lg cursor-pointer transition-all ${
+                                                    selectedStyle === style.id
+                                                        ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
+                                                        : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
+                                                }`}
+                                                onClick={() => setSelectedStyle(style.id)}
+                                                whileHover={{ scale: 1.02 }}
+                                                whileTap={{ scale: 0.98 }}
+                                            >
+                                                <div className="flex items-center gap-3 mb-2">
+                                                    <span className="text-2xl">{style.icon}</span>
+                                                    <h3 className="font-semibold text-gray-900 dark:text-white">
+                                                        {style.name}
+                                                    </h3>
                                                 </div>
-                                                <input
-                                                    {...register('is_public')}
-                                                    type="checkbox"
-                                                    className="h-4 w-4 text-amber-600 focus:ring-amber-500 border-gray-300 rounded"
-                                                />
-                                            </div>
-
-                                            <div className="flex items-center justify-between p-4 border border-gray-200 dark:border-gray-600 rounded-lg">
-                                                <div className="flex items-center gap-3">
-                                                    <LockClosedIcon className="w-5 h-5 text-blue-500" />
-                                                    <div>
-                                                        <h4 className="font-medium text-gray-900 dark:text-white">
-                                                            Требовать одобрение
-                                                        </h4>
-                                                        <p className="text-sm text-gray-600 dark:text-gray-400">
-                                                            Новые игроки должны получить ваше одобрение
-                                                        </p>
-                                                    </div>
-                                                </div>
-                                                <input
-                                                    {...register('requires_approval')}
-                                                    type="checkbox"
-                                                    className="h-4 w-4 text-amber-600 focus:ring-amber-500 border-gray-300 rounded"
-                                                />
-                                            </div>
-                                        </div>
-
-                                        <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-4">
-                                            <div className="flex">
-                                                <CheckIcon className="w-5 h-5 text-green-600 dark:text-green-400 mt-0.5" />
-                                                <div className="ml-3">
-                                                    <h4 className="text-sm font-medium text-green-800 dark:text-green-200">
-                                                        Все готово к созданию!
-                                                    </h4>
-                                                    <p className="text-sm text-green-700 dark:text-green-300 mt-1">
-                                                        Ваша кампания будет создана со всеми указанными настройками.
-                                                    </p>
-                                                </div>
-                                            </div>
-                                        </div>
+                                                <p className="text-sm text-gray-600 dark:text-gray-400">
+                                                    {style.description}
+                                                </p>
+                                                {selectedStyle === style.id && (
+                                                    <CheckIcon className="w-5 h-5 text-blue-600 mt-2" />
+                                                )}
+                                            </motion.div>
+                                        ))}
                                     </div>
-                                )}
-                            </motion.div>
-                        </AnimatePresence>
-                    </CardContent>
-                </Card>
 
-                {/* ✅ ИСПРАВЛЕННАЯ НАВИГАЦИЯ */}
+                                    <div className="space-y-4">
+                                        <label className="flex items-center">
+                                            <input
+                                                {...register('allow_homebrew')}
+                                                type="checkbox"
+                                                className="mr-3"
+                                            />
+                                            <span className="text-sm text-gray-700 dark:text-gray-300">
+                                                Разрешить homebrew контент (пользовательские расы, классы и т.д.)
+                                            </span>
+                                        </label>
+                                    </div>
+                                </CardContent>
+                            </Card>
+                        </motion.div>
+                    )}
+                </AnimatePresence>
+
+                {/* Navigation Buttons */}
                 <div className="flex justify-between mt-8">
                     <Button
                         type="button"
                         variant="outline"
                         onClick={prevStep}
                         disabled={currentStep === 1}
-                        className="flex items-center gap-2"
                     >
-                        <ArrowLeftIcon className="w-4 h-4" />
+                        <ArrowLeftIcon className="w-4 h-4 mr-2" />
                         Назад
                     </Button>
 
-                    {currentStep < 4 ? (
+                    {currentStep < 3 ? (
                         <Button
                             type="button"
-                            variant="primary"
                             onClick={nextStep}
-                            className="flex items-center gap-2"
+                            disabled={!isStepValid()}
                         >
                             Далее
-                            <ArrowRightIcon className="w-4 h-4" />
+                            <ArrowRightIcon className="w-4 h-4 ml-2" />
                         </Button>
                     ) : (
                         <Button
-                            type="button"  // ✅ Изменили на type="button"
-                            variant="primary"
-                            onClick={handleCreateCampaign}  // ✅ Используем отдельную функцию
-                            disabled={createMutation.isLoading}
-                            className="flex items-center gap-2"
+                            type="submit"
+                            disabled={!isStepValid() || createMutation.isPending}
                         >
-                            {createMutation.isLoading ? (
+                            {createMutation.isPending ? (
                                 <>
-                                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
+                                    <span className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full mr-2" />
                                     Создание...
                                 </>
                             ) : (
                                 <>
-                                    <CheckIcon className="w-4 h-4" />
+                                    <CheckIcon className="w-4 h-4 mr-2" />
                                     Создать кампанию
                                 </>
                             )}
                         </Button>
                     )}
                 </div>
-            </div>
+            </form>
         </div>
     );
 };

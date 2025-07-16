@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import { QueryClient, QueryClientProvider } from 'react-query';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Toaster } from 'react-hot-toast';
 import { useAuthStore } from '@/store/authStore';
 
@@ -34,13 +34,17 @@ import Layout from '@/components/layout/Layout';
 import LoadingScreen from '@/components/ui/LoadingScreen';
 import ProtectedRoute from '@/components/auth/ProtectedRoute';
 
-// Create React Query client
+// Create React Query client with TanStack Query v5 syntax
 const queryClient = new QueryClient({
     defaultOptions: {
         queries: {
             refetchOnWindowFocus: false,
             retry: 1,
             staleTime: 5 * 60 * 1000, // 5 minutes
+            gcTime: 10 * 60 * 1000, // 10 minutes (was cacheTime in v3)
+        },
+        mutations: {
+            retry: 1,
         },
     },
 });
@@ -85,8 +89,12 @@ function App() {
                                 </ProtectedRoute>
                             }
                         >
+                            {/* Dashboard */}
                             <Route index element={<Navigate to="/dashboard" replace />} />
                             <Route path="dashboard" element={<DashboardPage />} />
+
+                            {/* Profile */}
+                            <Route path="profile" element={<ProfilePage />} />
 
                             {/* Characters */}
                             <Route path="characters" element={<CharactersPage />} />
@@ -99,22 +107,12 @@ function App() {
                             <Route path="campaigns/create" element={<CreateCampaignPage />} />
                             <Route path="campaigns/:id" element={<CampaignDetailPage />} />
 
+                            {/* Game */}
+                            <Route path="game/:gameId" element={<GamePage />} />
+
                             {/* Tools */}
                             <Route path="tools/portrait-generator" element={<PortraitGeneratorPage />} />
-
-                            {/* Profile */}
-                            <Route path="profile" element={<ProfilePage />} />
                         </Route>
-
-                        {/* Game route (full screen) */}
-                        <Route
-                            path="/game/:gameId"
-                            element={
-                                <ProtectedRoute>
-                                    <GamePage />
-                                </ProtectedRoute>
-                            }
-                        />
 
                         {/* Catch all route */}
                         <Route path="*" element={<Navigate to="/dashboard" replace />} />

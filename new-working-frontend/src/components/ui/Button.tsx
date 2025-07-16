@@ -7,24 +7,43 @@ const buttonVariants = cva(
     {
         variants: {
             variant: {
-                default: "bg-primary text-primary-foreground shadow hover:bg-primary/90 focus-visible:ring-primary text-white",
-                destructive: "bg-destructive text-destructive-foreground shadow-sm hover:bg-destructive/90 focus-visible:ring-destructive text-white",
-                outline: "border border-input bg-background text-foreground shadow-sm hover:bg-accent hover:text-accent-foreground focus-visible:ring-ring text-gray-300 border-gray-600 hover:bg-gray-700 hover:text-white hover:border-gray-500",
-                secondary: "bg-secondary text-secondary-foreground shadow-sm hover:bg-secondary/80 focus-visible:ring-secondary text-gray-900 dark:text-gray-100",
-                ghost: "text-foreground hover:bg-accent hover:text-accent-foreground focus-visible:ring-ring text-gray-400 hover:bg-gray-700 hover:text-white",
-                link: "text-primary underline-offset-4 hover:underline focus-visible:ring-primary text-blue-400 hover:text-blue-300",
-                primary: "bg-blue-600 text-white shadow hover:bg-blue-700 focus-visible:ring-blue-500",
-                success: "bg-green-600 text-white shadow hover:bg-green-700 focus-visible:ring-green-500",
-                warning: "bg-yellow-600 text-white shadow hover:bg-yellow-700 focus-visible:ring-yellow-500",
-                danger: "bg-red-600 text-white shadow hover:bg-red-700 focus-visible:ring-red-500",
+                // ✅ ИСПРАВЛЕНО: Явные цвета для default кнопки
+                default: "bg-blue-600 text-white shadow hover:bg-blue-700 focus-visible:ring-blue-500 border-0",
+
+                // ✅ ИСПРАВЛЕНО: Явные цвета для destructive кнопки
+                destructive: "bg-red-600 text-white shadow-sm hover:bg-red-700 focus-visible:ring-red-500 border-0",
+
+                // ✅ ИСПРАВЛЕНО: Outline кнопка с контрастными цветами
+                outline: "border-2 border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 shadow-sm hover:bg-gray-50 dark:hover:bg-gray-700 hover:border-gray-400 dark:hover:border-gray-500 focus-visible:ring-gray-400",
+
+                // ✅ ИСПРАВЛЕНО: Secondary кнопка с читаемыми цветами
+                secondary: "bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-gray-100 border border-gray-200 dark:border-gray-600 shadow-sm hover:bg-gray-200 dark:hover:bg-gray-600 focus-visible:ring-gray-400",
+
+                // ✅ ИСПРАВЛЕНО: Ghost кнопка с правильными цветами
+                ghost: "text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-gray-100 focus-visible:ring-gray-400",
+
+                // ✅ ИСПРАВЛЕНО: Link кнопка с синим текстом
+                link: "text-blue-600 dark:text-blue-400 underline-offset-4 hover:underline hover:text-blue-700 dark:hover:text-blue-300 focus-visible:ring-blue-500",
+
+                // Дополнительные варианты с четкими цветами
+                primary: "bg-blue-600 text-white shadow hover:bg-blue-700 focus-visible:ring-blue-500 border-0",
+                success: "bg-green-600 text-white shadow hover:bg-green-700 focus-visible:ring-green-500 border-0",
+                warning: "bg-yellow-600 text-white shadow hover:bg-yellow-700 focus-visible:ring-yellow-500 border-0",
+                danger: "bg-red-600 text-white shadow hover:bg-red-700 focus-visible:ring-red-500 border-0",
+
+                // Специальные варианты для темных областей
                 darkOutline: "border-2 border-gray-500 bg-gray-800 text-gray-200 hover:bg-gray-700 hover:border-gray-400 hover:text-white focus-visible:ring-gray-400",
                 darkGhost: "text-gray-300 hover:bg-gray-700 hover:text-white focus-visible:ring-gray-400",
-                // НОВЫЕ ВАРИАНТЫ ДЛЯ СВЕТЛЫХ ОБЛАСТЕЙ
+
+                // Специальные варианты для светлых областей
                 lightOutline: "border-2 border-gray-300 bg-white text-gray-800 hover:bg-gray-50 hover:border-gray-400 hover:text-gray-900 focus-visible:ring-gray-300 shadow-sm",
                 lightGhost: "text-gray-700 hover:bg-gray-100 hover:text-gray-900 focus-visible:ring-gray-300",
                 lightSecondary: "bg-gray-100 text-gray-800 border border-gray-200 hover:bg-gray-200 hover:text-gray-900 focus-visible:ring-gray-300 shadow-sm",
-                gameAction: "bg-gradient-to-r from-purple-600 to-blue-600 text-white shadow-lg hover:from-purple-700 hover:to-blue-700 focus-visible:ring-purple-500",
-                diceRoll: "bg-gradient-to-r from-green-600 to-emerald-600 text-white shadow-lg hover:from-green-700 hover:to-emerald-700 focus-visible:ring-green-500"
+
+                // Игровые варианты
+                gameAction: "bg-gradient-to-r from-purple-600 to-blue-600 text-white shadow-lg hover:from-purple-700 hover:to-blue-700 focus-visible:ring-purple-500 border-0",
+                diceRoll: "bg-gradient-to-r from-green-600 to-emerald-600 text-white shadow-lg hover:from-green-700 hover:to-emerald-700 focus-visible:ring-green-500 border-0",
+                fantasy: "bg-gradient-to-r from-amber-600 to-yellow-600 text-white shadow-lg hover:from-amber-700 hover:to-yellow-700 focus-visible:ring-amber-500 border-0"
             },
             size: {
                 default: "h-9 px-4 py-2",
@@ -74,7 +93,6 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
                 className={cn(
                     buttonVariants({ variant, size }),
                     loading && "cursor-wait",
-                    "font-medium",
                     className
                 )}
                 ref={ref}

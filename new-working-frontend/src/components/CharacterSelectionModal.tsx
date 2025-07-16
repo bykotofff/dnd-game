@@ -1,4 +1,3 @@
-// new-working-frontend/src/components/CharacterSelectionModal.tsx
 import React, { useState, Fragment } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
 import { useQuery } from '@tanstack/react-query';
@@ -24,6 +23,12 @@ interface CharacterSelectionModalProps {
     loading?: boolean;
 }
 
+const LoadingSpinner = () => (
+    <div className="flex justify-center py-8">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+    </div>
+);
+
 export const CharacterSelectionModal: React.FC<CharacterSelectionModalProps> = ({
                                                                                     isOpen,
                                                                                     onClose,
@@ -41,63 +46,34 @@ export const CharacterSelectionModal: React.FC<CharacterSelectionModalProps> = (
     } = useQuery({
         queryKey: ['characters'],
         queryFn: () => characterService.getCharacters(),
-        enabled: isOpen, // Загружаем только когда модал открыт
+        enabled: isOpen,
     });
-
-    const handleConfirm = () => {
-        if (!selectedCharacter) {
-            toast.error('Выберите персонажа для игры');
-            return;
-        }
-
-        onCharacterSelected(selectedCharacter);
-    };
 
     const handleCharacterClick = (character: CharacterResponse) => {
         setSelectedCharacter(character);
     };
 
-    const getCharacterClassIcon = (characterClass: string) => {
-        // Простые иконки для разных классов
-        const classIcons: Record<string, React.ComponentType<any>> = {
+    const handleConfirm = () => {
+        if (selectedCharacter) {
+            onCharacterSelected(selectedCharacter);
+        }
+    };
+
+    const getClassIcon = (characterClass: string) => {
+        // Простая логика для иконок классов
+        const classIcons: Record<string, any> = {
             fighter: ShieldCheckIcon,
             wizard: SparklesIcon,
             rogue: UserIcon,
-            cleric: UserIcon,
-            ranger: UserIcon,
-            paladin: ShieldCheckIcon,
-            barbarian: ShieldCheckIcon,
-            bard: SparklesIcon,
-            druid: SparklesIcon,
-            monk: UserIcon,
-            sorcerer: SparklesIcon,
-            warlock: SparklesIcon,
+            // Добавьте больше классов по необходимости
         };
-
-        const IconComponent = classIcons[characterClass.toLowerCase()] || UserIcon;
-        return IconComponent;
+        return classIcons[characterClass.toLowerCase()] || UserIcon;
     };
 
-    const getCharacterLevelBadge = (level: number) => {
-        const color = level >= 10 ? 'bg-purple-100 text-purple-800' :
-            level >= 5 ? 'bg-blue-100 text-blue-800' :
-                'bg-green-100 text-green-800';
-
-        return (
-            <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${color}`}>
-                {level} ур.
-            </span>
-        );
-    };
-
-    // Простой спиннер
-    const LoadingSpinner = () => (
-        <div className="flex items-center justify-center py-8">
-            <div className="animate-spin rounded-full h-8 w-8 border-4 border-blue-500 border-t-transparent"></div>
-            <span className="ml-2 text-gray-600 dark:text-gray-400">
-                Загрузка персонажей...
-            </span>
-        </div>
+    const getCharacterLevelBadge = (level: number) => (
+        <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">
+            {level} ур.
+        </span>
     );
 
     return (
@@ -112,7 +88,7 @@ export const CharacterSelectionModal: React.FC<CharacterSelectionModalProps> = (
                     leaveFrom="opacity-100"
                     leaveTo="opacity-0"
                 >
-                    <div className="fixed inset-0 bg-black bg-opacity-25" />
+                    <div className="fixed inset-0 bg-black bg-opacity-50" />
                 </Transition.Child>
 
                 <div className="fixed inset-0 overflow-y-auto">
@@ -128,12 +104,9 @@ export const CharacterSelectionModal: React.FC<CharacterSelectionModalProps> = (
                         >
                             <Dialog.Panel className="w-full max-w-2xl transform overflow-hidden rounded-lg bg-white dark:bg-gray-800 p-6 text-left align-middle shadow-xl transition-all">
                                 {/* Header */}
-                                <div className="flex items-center justify-between mb-6">
+                                <div className="flex items-center justify-between mb-4">
                                     <div>
-                                        <Dialog.Title
-                                            as="h3"
-                                            className="text-lg font-medium leading-6 text-gray-900 dark:text-white"
-                                        >
+                                        <Dialog.Title className="text-lg font-medium leading-6 text-gray-900 dark:text-white">
                                             Выберите персонажа
                                         </Dialog.Title>
                                         <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
@@ -142,7 +115,7 @@ export const CharacterSelectionModal: React.FC<CharacterSelectionModalProps> = (
                                     </div>
                                     <button
                                         onClick={onClose}
-                                        className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                                        className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
                                     >
                                         <XMarkIcon className="h-6 w-6" />
                                     </button>
@@ -155,39 +128,43 @@ export const CharacterSelectionModal: React.FC<CharacterSelectionModalProps> = (
                                     ) : error ? (
                                         <div className="text-center py-8">
                                             <ExclamationTriangleIcon className="mx-auto h-12 w-12 text-red-500 mb-4" />
-                                            <p className="text-red-600 dark:text-red-400">
+                                            <p className="text-red-600 dark:text-red-400 mb-4">
                                                 Ошибка загрузки персонажей
                                             </p>
+                                            <Button
+                                                onClick={() => window.location.reload()}
+                                                variant="outline"
+                                                className="text-gray-700 dark:text-gray-300 border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700"
+                                            >
+                                                Попробовать еще раз
+                                            </Button>
                                         </div>
                                     ) : characters.length === 0 ? (
                                         <div className="text-center py-8">
                                             <UserIcon className="mx-auto h-12 w-12 text-gray-400 mb-4" />
                                             <p className="text-gray-600 dark:text-gray-400 mb-4">
-                                                У вас пока нет созданных персонажей
+                                                У вас пока нет персонажей
                                             </p>
                                             <Button
-                                                variant="outline"
-                                                onClick={() => {
-                                                    onClose();
-                                                    window.open('/characters/create', '_blank');
-                                                }}
+                                                onClick={() => window.open('/characters/create', '_blank')}
+                                                className="bg-blue-600 hover:bg-blue-700 text-white border-0"
                                             >
                                                 Создать персонажа
                                             </Button>
                                         </div>
                                     ) : (
-                                        <div className="grid gap-3 max-h-96 overflow-y-auto">
+                                        <div className="space-y-3 max-h-96 overflow-y-auto">
                                             {characters.map((character) => {
                                                 const isSelected = selectedCharacter?.id === character.id;
-                                                const IconComponent = getCharacterClassIcon(character.character_class);
+                                                const IconComponent = getClassIcon(character.character_class || '');
 
                                                 return (
                                                     <Card
                                                         key={character.id}
-                                                        className={`cursor-pointer transition-all duration-200 ${
+                                                        className={`cursor-pointer transition-all duration-200 border-2 ${
                                                             isSelected
                                                                 ? 'ring-2 ring-blue-500 border-blue-500 bg-blue-50 dark:bg-blue-900/20'
-                                                                : 'hover:shadow-md hover:border-gray-300 dark:hover:border-gray-600'
+                                                                : 'hover:shadow-md hover:border-gray-300 dark:hover:border-gray-600 border-gray-200 dark:border-gray-700'
                                                         }`}
                                                         onClick={() => handleCharacterClick(character)}
                                                     >
@@ -242,25 +219,25 @@ export const CharacterSelectionModal: React.FC<CharacterSelectionModalProps> = (
                                 {/* Footer */}
                                 <div className="flex justify-end space-x-3 pt-4 border-t border-gray-200 dark:border-gray-700">
                                     <Button
-                                        variant="outline"
                                         onClick={onClose}
+                                        variant="outline"
                                         disabled={loading}
+                                        className="px-4 py-2 text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 focus:ring-2 focus:ring-gray-500 disabled:opacity-50"
                                     >
                                         Отмена
                                     </Button>
-
                                     <Button
-                                        variant="primary"
                                         onClick={handleConfirm}
-                                        disabled={!selectedCharacter || loading || characters.length === 0}
+                                        disabled={!selectedCharacter || loading}
+                                        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white border-0 focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
                                     >
                                         {loading ? (
                                             <>
-                                                <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent mr-2"></div>
-                                                <span>Запуск...</span>
+                                                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                                                Загрузка...
                                             </>
                                         ) : (
-                                            'Начать игру'
+                                            'Выбрать персонажа'
                                         )}
                                     </Button>
                                 </div>

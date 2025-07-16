@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { useQuery } from 'react-query';
+import { useQuery } from '@tanstack/react-query';
 import {
     PlusIcon,
     UserGroupIcon,
@@ -19,13 +19,12 @@ import { formatDate } from '@/utils';
 import type { CharacterListItem } from '@/services/characterService';
 
 const CharactersPage: React.FC = () => {
-    const { data: characters, isLoading, error } = useQuery(
-        'characters',
-        () => characterService.getCharacters(),
-        {
-            staleTime: 5 * 60 * 1000, // 5 minutes
-        }
-    );
+    // Исправлено для TanStack Query v5
+    const { data: characters, isLoading, error } = useQuery({
+        queryKey: ['characters'],
+        queryFn: () => characterService.getCharacters(),
+        staleTime: 5 * 60 * 1000, // 5 minutes
+    });
 
     if (isLoading) {
         return <LoadingScreen message="Загрузка персонажей..." />;
@@ -64,138 +63,146 @@ const CharactersPage: React.FC = () => {
 
             {/* Characters Grid */}
             {characters && characters.length > 0 ? (
-                <motion.div
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"
-                >
-                    {characters.map((character, index) => (
-                        <CharacterCard key={character.id} character={character} index={index} />
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {characters.map((character: CharacterListItem, index: number) => (
+                        <motion.div
+                            key={character.id}
+                            initial={{ opacity: 0, y: 20 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ duration: 0.3, delay: index * 0.1 }}
+                        >
+                            <Card className="character-card hover:shadow-lg transition-all duration-300 group">
+                                <CardHeader className="pb-3">
+                                    <div className="flex items-start justify-between">
+                                        <div className="flex-1">
+                                            <CardTitle className="text-xl font-fantasy text-gray-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
+                                                {character.name}
+                                            </CardTitle>
+                                            <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                                                {character.race} {character.class_name}
+                                            </p>
+                                        </div>
+                                        <div className="text-right">
+                                            <div className="text-lg font-bold text-blue-600 dark:text-blue-400">
+                                                {character.level}
+                                            </div>
+                                            <div className="text-xs text-gray-500">уровень</div>
+                                        </div>
+                                    </div>
+                                </CardHeader>
+
+                                <CardContent className="pt-0">
+                                    {/* Character Portrait */}
+                                    <div className="mb-4">
+                                        <div className="w-full h-32 bg-gradient-to-br from-gray-100 to-gray-200 dark:from-gray-700 dark:to-gray-800 rounded-lg flex items-center justify-center overflow-hidden">
+                                            {character.portrait_url ? (
+                                                <img
+                                                    src={character.portrait_url}
+                                                    alt={character.name}
+                                                    className="w-full h-full object-cover"
+                                                />
+                                            ) : (
+                                                <UserGroupIcon className="w-12 h-12 text-gray-400" />
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    {/* Character Stats */}
+                                    <div className="grid grid-cols-3 gap-2 mb-4">
+                                        <div className="text-center">
+                                            <div className="flex items-center justify-center mb-1">
+                                                <HeartIcon className="w-4 h-4 text-red-500 mr-1" />
+                                                <span className="text-sm font-medium">HP</span>
+                                            </div>
+                                            <div className="text-lg font-bold text-red-600">
+                                                {character.hit_points?.current || 0}/{character.hit_points?.max || 0}
+                                            </div>
+                                        </div>
+                                        <div className="text-center">
+                                            <div className="flex items-center justify-center mb-1">
+                                                <ShieldCheckIcon className="w-4 h-4 text-blue-500 mr-1" />
+                                                <span className="text-sm font-medium">AC</span>
+                                            </div>
+                                            <div className="text-lg font-bold text-blue-600">
+                                                {character.armor_class || 10}
+                                            </div>
+                                        </div>
+                                        <div className="text-center">
+                                            <div className="flex items-center justify-center mb-1">
+                                                <span className="text-sm font-medium">XP</span>
+                                            </div>
+                                            <div className="text-sm font-bold text-green-600">
+                                                {character.experience || 0}
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* Background & Created Date */}
+                                    <div className="space-y-2 mb-4">
+                                        {character.background && (
+                                            <p className="text-sm text-gray-600 dark:text-gray-400">
+                                                <span className="font-medium">Предыстория:</span> {character.background}
+                                            </p>
+                                        )}
+                                        <p className="text-xs text-gray-500">
+                                            Создан: {formatDate(character.created_at)}
+                                        </p>
+                                    </div>
+
+                                    {/* Actions */}
+                                    <div className="flex gap-2">
+                                        <Button
+                                            size="sm"
+                                            variant="outline"
+                                            className="flex-1"
+                                            asChild
+                                        >
+                                            <Link to={`/characters/${character.id}`}>
+                                                <EyeIcon className="w-4 h-4 mr-1" />
+                                                Смотреть
+                                            </Link>
+                                        </Button>
+                                        <Button
+                                            size="sm"
+                                            className="flex-1"
+                                            asChild
+                                        >
+                                            <Link to={`/characters/${character.id}/edit`}>
+                                                <PencilIcon className="w-4 h-4 mr-1" />
+                                                Изменить
+                                            </Link>
+                                        </Button>
+                                    </div>
+                                </CardContent>
+                            </Card>
+                        </motion.div>
                     ))}
-                </motion.div>
+                </div>
             ) : (
-                <Card>
-                    <CardContent className="py-16">
-                        <div className="text-center">
-                            <UserGroupIcon className="h-16 w-16 text-gray-400 mx-auto mb-4" />
-                            <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">
-                                У вас пока нет персонажей
-                            </h3>
-                            <p className="text-gray-500 dark:text-gray-400 mb-6">
-                                Создайте своего первого героя для участия в приключениях
-                            </p>
-                            <Button variant="fantasy" asChild>
-                                <Link to="/characters/create">
-                                    Создать персонажа
-                                </Link>
-                            </Button>
-                        </div>
-                    </CardContent>
-                </Card>
+                /* Empty State */
+                <div className="text-center py-16">
+                    <motion.div
+                        initial={{ opacity: 0, scale: 0.9 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        transition={{ duration: 0.3 }}
+                    >
+                        <UserGroupIcon className="w-24 h-24 text-gray-300 dark:text-gray-600 mx-auto mb-6" />
+                        <h3 className="text-2xl font-fantasy font-bold text-gray-900 dark:text-white mb-4">
+                            У вас пока нет персонажей
+                        </h3>
+                        <p className="text-gray-600 dark:text-gray-400 mb-8 max-w-md mx-auto">
+                            Создайте своего первого героя и отправьтесь в захватывающие приключения в мире D&D!
+                        </p>
+                        <Button variant="fantasy" size="lg" asChild>
+                            <Link to="/characters/create">
+                                <PlusIcon className="w-5 h-5 mr-2" />
+                                Создать первого персонажа
+                            </Link>
+                        </Button>
+                    </motion.div>
+                </div>
             )}
         </div>
-    );
-};
-
-interface CharacterCardProps {
-    character: CharacterListItem;
-    index: number;
-}
-
-const CharacterCard: React.FC<CharacterCardProps> = ({ character, index }) => {
-    return (
-        <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: index * 0.1 }}
-        >
-            <Card
-                variant="character"
-                className="hover:shadow-lg transition-all duration-200 hover:-translate-y-1"
-            >
-                <CardHeader className="pb-3">
-                    <div className="flex items-center justify-between">
-                        <CardTitle className="text-lg font-fantasy">
-                            {character.name}
-                        </CardTitle>
-                        <div className="flex items-center space-x-2">
-                            {character.is_alive ? (
-                                <div className="flex items-center text-green-600 dark:text-green-400">
-                                    <HeartIcon className="h-4 w-4 mr-1" />
-                                    <span className="text-xs">Жив</span>
-                                </div>
-                            ) : (
-                                <div className="flex items-center text-red-600 dark:text-red-400">
-                                    <HeartIcon className="h-4 w-4 mr-1" />
-                                    <span className="text-xs">Мертв</span>
-                                </div>
-                            )}
-                        </div>
-                    </div>
-                </CardHeader>
-
-                <CardContent className="space-y-4">
-                    {/* Character Info */}
-                    <div className="space-y-2">
-                        <div className="flex items-center justify-between text-sm">
-                            <span className="text-gray-600 dark:text-gray-400">Раса:</span>
-                            <span className="font-medium text-gray-900 dark:text-white">
-                {character.race}
-              </span>
-                        </div>
-
-                        <div className="flex items-center justify-between text-sm">
-                            <span className="text-gray-600 dark:text-gray-400">Класс:</span>
-                            <span className="font-medium text-gray-900 dark:text-white">
-                {character.character_class}
-              </span>
-                        </div>
-
-                        <div className="flex items-center justify-between text-sm">
-                            <span className="text-gray-600 dark:text-gray-400">Уровень:</span>
-                            <div className="flex items-center space-x-1">
-                                <ShieldCheckIcon className="h-4 w-4 text-primary-500" />
-                                <span className="font-bold text-primary-600 dark:text-primary-400">
-                  {character.level}
-                </span>
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* Creation Date */}
-                    <div className="text-xs text-gray-500 dark:text-gray-400 border-t pt-3">
-                        Создан: {formatDate(character.created_at)}
-                    </div>
-
-                    {/* Actions */}
-                    <div className="flex space-x-2 pt-2">
-                        <Button
-                            variant="outline"
-                            size="sm"
-                            className="flex-1"
-                            asChild
-                        >
-                            <Link to={`/characters/${character.id}`}>
-                                <EyeIcon className="h-4 w-4 mr-1" />
-                                Просмотр
-                            </Link>
-                        </Button>
-
-                        <Button
-                            variant="default"
-                            size="sm"
-                            className="flex-1"
-                            asChild
-                        >
-                            <Link to={`/characters/${character.id}/edit`}>
-                                <PencilIcon className="h-4 w-4 mr-1" />
-                                Изменить
-                            </Link>
-                        </Button>
-                    </div>
-                </CardContent>
-            </Card>
-        </motion.div>
     );
 };
 

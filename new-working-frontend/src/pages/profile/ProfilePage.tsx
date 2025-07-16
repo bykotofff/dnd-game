@@ -1,12 +1,12 @@
 import React, { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from 'react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import { toast } from 'react-hot-toast';
 import { motion } from 'framer-motion';
 import {
     UserIcon,
     PencilIcon,
-    CheckIcon, // Исправлено: используем CheckIcon вместо SaveIcon
+    CheckIcon,
     CameraIcon,
     ClockIcon,
     TrophyIcon,
@@ -48,14 +48,12 @@ const ProfilePage: React.FC = () => {
     const queryClient = useQueryClient();
     const [isEditing, setIsEditing] = useState(false);
 
-    // Получение полного профиля
-    const { data: profile, isLoading, error } = useQuery<UserProfile>(
-        ['profile'],
-        () => apiService.get('/api/users/me'),
-        {
-            staleTime: 5 * 60 * 1000, // 5 минут
-        }
-    );
+    // Получение полного профиля - исправлен для TanStack Query v5
+    const { data: profile, isLoading, error } = useQuery<UserProfile>({
+        queryKey: ['profile'],
+        queryFn: () => apiService.get('/api/users/me'),
+        staleTime: 5 * 60 * 1000, // 5 минут
+    });
 
     // Форма для редактирования
     const { register, handleSubmit, reset, formState: { isDirty, isSubmitting } } = useForm<ProfileFormData>({
@@ -77,308 +75,200 @@ const ProfilePage: React.FC = () => {
         }
     }, [profile, reset]);
 
-    // Мутация для обновления профиля
-    const updateProfileMutation = useMutation(
-        (data: ProfileFormData) => apiService.put('/api/users/me', data),
-        {
-            onSuccess: () => {
-                queryClient.invalidateQueries(['profile']);
-                queryClient.invalidateQueries(['auth']);
-                toast.success('Профиль обновлен!');
-                setIsEditing(false);
-            },
-            onError: () => {
-                toast.error('Ошибка при обновлении профиля');
-            },
-        }
-    );
+    // Мутация для обновления профиля - исправлена для TanStack Query v5
+    const updateProfileMutation = useMutation({
+        mutationFn: (data: ProfileFormData) => apiService.put('/api/users/me', data),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['profile'] });
+            queryClient.invalidateQueries({ queryKey: ['auth'] });
+            toast.success('Профиль обновлен!');
+            setIsEditing(false);
+        },
+        onError: (error: any) => {
+            toast.error(error.response?.data?.detail || 'Ошибка при обновлении профиля');
+        },
+    });
 
     const onSubmit = (data: ProfileFormData) => {
         updateProfileMutation.mutate(data);
     };
 
-    const handleCancel = () => {
-        reset();
-        setIsEditing(false);
-    };
-
     if (isLoading) {
-        return <LoadingScreen message="Загрузка профиля..." />;
+        return <LoadingScreen />;
     }
 
-    if (error || !profile) {
+    if (error) {
         return (
-            <div className="text-center py-16">
-                <div className="text-red-500 text-lg mb-4">Ошибка загрузки профиля</div>
-                <Button variant="outline" onClick={() => window.location.reload()}>
-                    Попробовать снова
-                </Button>
+            <div className="max-w-4xl mx-auto p-6">
+                <Card>
+                    <CardContent className="p-6">
+                        <div className="text-center text-red-600">
+                            Ошибка при загрузке профиля
+                        </div>
+                    </CardContent>
+                </Card>
             </div>
         );
     }
 
-    const stats = [
-        {
-            name: 'Игр сыграно',
-            value: profile.games_played || 0,
-            icon: TrophyIcon,
-            color: 'text-yellow-600',
-            bgColor: 'bg-yellow-100 dark:bg-yellow-900',
-        },
-        {
-            name: 'Время в игре',
-            value: `${Math.round((profile.total_playtime || 0) / 60)}ч`,
-            icon: ClockIcon,
-            color: 'text-blue-600',
-            bgColor: 'bg-blue-100 dark:bg-blue-900',
-        },
-        {
-            name: 'Активных персонажей',
-            value: 3, // TODO: Получать из API
-            icon: UserGroupIcon,
-            color: 'text-green-600',
-            bgColor: 'bg-green-100 dark:bg-green-900',
-        },
-        {
-            name: 'Уровень активности',
-            value: 'Высокий',
-            icon: FireIcon,
-            color: 'text-red-600',
-            bgColor: 'bg-red-100 dark:bg-red-900',
-        },
-    ];
-
     return (
-        <div className="space-y-8">
-            {/* Header */}
-            <div className="flex items-center justify-between">
-                <div>
-                    <h1 className="text-3xl font-fantasy font-bold text-gray-900 dark:text-white">
-                        Мой профиль
-                    </h1>
-                    <p className="text-gray-600 dark:text-gray-400 mt-2">
-                        Управляйте своей учетной записью и настройками
-                    </p>
-                </div>
-                {!isEditing && (
-                    <Button variant="default" onClick={() => setIsEditing(true)}>
-                        <PencilIcon className="h-5 w-5 mr-2" />
-                        Редактировать
-                    </Button>
-                )}
-            </div>
+        <div className="max-w-4xl mx-auto p-6 space-y-6">
+            {/* Profile Header */}
+            <Card>
+                <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                        <UserIcon className="w-6 h-6" />
+                        Профиль пользователя
+                    </CardTitle>
+                </CardHeader>
+                <CardContent>
+                    <div className="flex items-start gap-6">
+                        {/* Avatar */}
+                        <div className="relative">
+                            <div className="w-24 h-24 bg-gray-200 dark:bg-gray-700 rounded-full flex items-center justify-center">
+                                {profile?.avatar_url ? (
+                                    <img
+                                        src={profile.avatar_url}
+                                        alt="Avatar"
+                                        className="w-24 h-24 rounded-full object-cover"
+                                    />
+                                ) : (
+                                    <UserIcon className="w-12 h-12 text-gray-400" />
+                                )}
+                            </div>
+                            <button className="absolute bottom-0 right-0 bg-blue-600 text-white p-2 rounded-full hover:bg-blue-700 transition-colors">
+                                <CameraIcon className="w-4 h-4" />
+                            </button>
+                        </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                {/* Основная информация */}
-                <div className="lg:col-span-2 space-y-6">
-                    <Card>
-                        <CardHeader>
-                            <CardTitle>Основная информация</CardTitle>
-                        </CardHeader>
-                        <CardContent>
+                        {/* Basic Info */}
+                        <div className="flex-1">
+                            <div className="flex items-center justify-between mb-4">
+                                <div>
+                                    <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
+                                        {profile?.display_name || profile?.username}
+                                    </h2>
+                                    <p className="text-gray-600 dark:text-gray-400">
+                                        @{profile?.username}
+                                    </p>
+                                </div>
+                                <Button
+                                    onClick={() => setIsEditing(!isEditing)}
+                                    variant="outline"
+                                    className="flex items-center gap-2"
+                                >
+                                    <PencilIcon className="w-4 h-4" />
+                                    {isEditing ? 'Отменить' : 'Редактировать'}
+                                </Button>
+                            </div>
+
                             {isEditing ? (
-                                <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+                                <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
                                     <div>
-                                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                                             Отображаемое имя
                                         </label>
                                         <Input
                                             {...register('display_name')}
-                                            placeholder="Как вас зовут?"
+                                            placeholder="Введите отображаемое имя"
                                         />
                                     </div>
-
                                     <div>
-                                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                                             О себе
                                         </label>
                                         <textarea
                                             {...register('bio')}
-                                            rows={4}
-                                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                                            placeholder="Расскажите о себе..."
+                                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                                            rows={3}
+                                            placeholder="Расскажите о себе"
                                         />
                                     </div>
-
-                                    <div>
-                                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                                            URL аватара
-                                        </label>
-                                        <Input
-                                            {...register('avatar_url')}
-                                            placeholder="https://..."
-                                        />
-                                    </div>
-
-                                    <div className="flex space-x-3">
-                                        <Button
-                                            type="button"
-                                            variant="outline"
-                                            onClick={handleCancel}
-                                        >
-                                            Отмена
-                                        </Button>
+                                    <div className="flex gap-2">
                                         <Button
                                             type="submit"
-                                            variant="fantasy"
-                                            loading={isSubmitting}
-                                            disabled={!isDirty}
+                                            disabled={!isDirty || isSubmitting}
+                                            className="flex items-center gap-2"
                                         >
-                                            <CheckIcon className="h-5 w-5 mr-2" />
+                                            <CheckIcon className="w-4 h-4" />
                                             Сохранить
                                         </Button>
                                     </div>
                                 </form>
                             ) : (
-                                <div className="space-y-6">
-                                    <div className="flex items-start space-x-6">
-                                        {/* Аватар */}
-                                        <div className="flex-shrink-0">
-                                            {profile.avatar_url ? (
-                                                <img
-                                                    src={profile.avatar_url}
-                                                    alt={profile.display_name || profile.username}
-                                                    className="w-20 h-20 rounded-full object-cover border-2 border-primary-200 dark:border-primary-700"
-                                                />
-                                            ) : (
-                                                <div className="w-20 h-20 bg-gradient-to-br from-primary-100 to-primary-200 dark:from-primary-800 dark:to-primary-900 rounded-full flex items-center justify-center border-2 border-primary-200 dark:border-primary-700">
-                                                    <UserIcon className="w-10 h-10 text-primary-400 dark:text-primary-500" />
-                                                </div>
-                                            )}
-                                        </div>
-
-                                        {/* Информация */}
-                                        <div className="flex-1 space-y-4">
-                                            <div>
-                                                <label className="text-sm font-medium text-gray-500 dark:text-gray-400">
-                                                    Отображаемое имя
-                                                </label>
-                                                <p className="text-lg font-semibold text-gray-900 dark:text-white">
-                                                    {profile.display_name || 'Не указано'}
-                                                </p>
-                                            </div>
-
-                                            <div>
-                                                <label className="text-sm font-medium text-gray-500 dark:text-gray-400">
-                                                    Имя пользователя
-                                                </label>
-                                                <p className="text-lg font-semibold text-gray-900 dark:text-white">
-                                                    {profile.username}
-                                                </p>
-                                            </div>
-
-                                            <div>
-                                                <label className="text-sm font-medium text-gray-500 dark:text-gray-400">
-                                                    Email
-                                                </label>
-                                                <p className="text-lg font-semibold text-gray-900 dark:text-white">
-                                                    {profile.email}
-                                                    {profile.is_verified ? (
-                                                        <span className="ml-2 inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
-                                                            Подтвержден
-                                                        </span>
-                                                    ) : (
-                                                        <span className="ml-2 inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200">
-                                                            Не подтвержден
-                                                        </span>
-                                                    )}
-                                                </p>
-                                            </div>
-
-                                            {profile.bio && (
-                                                <div>
-                                                    <label className="text-sm font-medium text-gray-500 dark:text-gray-400">
-                                                        О себе
-                                                    </label>
-                                                    <p className="text-gray-900 dark:text-white">
-                                                        {profile.bio}
-                                                    </p>
-                                                </div>
-                                            )}
-                                        </div>
-                                    </div>
+                                <div className="space-y-2">
+                                    <p className="text-gray-600 dark:text-gray-400">
+                                        <strong>Email:</strong> {profile?.email}
+                                    </p>
+                                    {profile?.bio && (
+                                        <p className="text-gray-600 dark:text-gray-400">
+                                            <strong>О себе:</strong> {profile.bio}
+                                        </p>
+                                    )}
+                                    <p className="text-gray-600 dark:text-gray-400">
+                                        <strong>Зарегистрирован:</strong> {formatDate(profile?.created_at)}
+                                    </p>
+                                    {profile?.last_login && (
+                                        <p className="text-gray-600 dark:text-gray-400">
+                                            <strong>Последний вход:</strong> {formatDate(profile.last_login)}
+                                        </p>
+                                    )}
                                 </div>
                             )}
-                        </CardContent>
-                    </Card>
+                        </div>
+                    </div>
+                </CardContent>
+            </Card>
 
-                    {/* Информация об активности */}
-                    <Card>
-                        <CardHeader>
-                            <CardTitle>Активность</CardTitle>
-                        </CardHeader>
-                        <CardContent>
-                            <div className="space-y-4">
-                                <div>
-                                    <label className="text-sm font-medium text-gray-500 dark:text-gray-400">
-                                        Дата регистрации
-                                    </label>
-                                    <p className="text-gray-900 dark:text-white">
-                                        {formatDate(profile.created_at)}
-                                    </p>
-                                </div>
-
-                                {profile.last_login && (
-                                    <div>
-                                        <label className="text-sm font-medium text-gray-500 dark:text-gray-400">
-                                            Последний вход
-                                        </label>
-                                        <p className="text-gray-900 dark:text-white">
-                                            {formatDate(profile.last_login)}
-                                        </p>
-                                    </div>
-                                )}
-
-                                {profile.last_seen && (
-                                    <div>
-                                        <label className="text-sm font-medium text-gray-500 dark:text-gray-400">
-                                            Последняя активность
-                                        </label>
-                                        <p className="text-gray-900 dark:text-white">
-                                            {formatDate(profile.last_seen)}
-                                        </p>
-                                    </div>
-                                )}
+            {/* Statistics */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <Card>
+                    <CardContent className="p-6">
+                        <div className="flex items-center gap-3">
+                            <TrophyIcon className="w-8 h-8 text-yellow-500" />
+                            <div>
+                                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+                                    Игр сыграно
+                                </h3>
+                                <p className="text-2xl font-bold text-yellow-600">
+                                    {profile?.games_played || 0}
+                                </p>
                             </div>
-                        </CardContent>
-                    </Card>
-                </div>
+                        </div>
+                    </CardContent>
+                </Card>
 
-                {/* Статистика */}
-                <div className="space-y-6">
-                    <Card>
-                        <CardHeader>
-                            <CardTitle>Статистика игр</CardTitle>
-                        </CardHeader>
-                        <CardContent>
-                            <div className="space-y-4">
-                                {stats.map((stat) => {
-                                    const Icon = stat.icon;
-                                    return (
-                                        <motion.div
-                                            key={stat.name}
-                                            initial={{ opacity: 0, x: 20 }}
-                                            animate={{ opacity: 1, x: 0 }}
-                                            className="flex items-center space-x-3"
-                                        >
-                                            <div className={`p-2 rounded-lg ${stat.bgColor}`}>
-                                                <Icon className={`h-5 w-5 ${stat.color}`} />
-                                            </div>
-                                            <div className="flex-1">
-                                                <p className="text-sm font-medium text-gray-500 dark:text-gray-400">
-                                                    {stat.name}
-                                                </p>
-                                                <p className="text-lg font-bold text-gray-900 dark:text-white">
-                                                    {stat.value}
-                                                </p>
-                                            </div>
-                                        </motion.div>
-                                    );
-                                })}
+                <Card>
+                    <CardContent className="p-6">
+                        <div className="flex items-center gap-3">
+                            <ClockIcon className="w-8 h-8 text-blue-500" />
+                            <div>
+                                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+                                    Время в игре
+                                </h3>
+                                <p className="text-2xl font-bold text-blue-600">
+                                    {Math.round((profile?.total_playtime || 0) / 60)} ч
+                                </p>
                             </div>
-                        </CardContent>
-                    </Card>
-                </div>
+                        </div>
+                    </CardContent>
+                </Card>
+
+                <Card>
+                    <CardContent className="p-6">
+                        <div className="flex items-center gap-3">
+                            <FireIcon className="w-8 h-8 text-red-500" />
+                            <div>
+                                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+                                    Статус
+                                </h3>
+                                <p className="text-sm font-medium text-green-600">
+                                    {profile?.is_verified ? 'Верифицирован' : 'Активен'}
+                                </p>
+                            </div>
+                        </div>
+                    </CardContent>
+                </Card>
             </div>
         </div>
     );

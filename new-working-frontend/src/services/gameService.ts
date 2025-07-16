@@ -22,6 +22,11 @@ export interface JoinGameData {
     character_id?: string;
 }
 
+export interface StartGameData {
+    campaign_id: string;
+    character_id: string;
+}
+
 export interface GetGamesParams {
     status_filter?: 'waiting' | 'active' | 'paused' | 'ended';
     campaign_id?: string;
@@ -44,7 +49,7 @@ export interface GameDetailResponse extends GameResponse {
     campaign_id: string;
     game_system: string;
     settings: any;
-    players: string[];
+    players: Record<string, any>;
     characters: string[];
     updated_at: string;
 }
@@ -100,24 +105,84 @@ export interface InitiativeEntry {
 }
 
 class GameService {
-    // ✅ УЛУЧШЕННОЕ СОЗДАНИЕ ИГРЫ
-    async createGame(data: CreateGameData): Promise<GameResponse> {
-        return apiService.retryRequest(() =>
-                apiService.post('/games', data),
-            2 // Retry только 2 раза для создания
-        );
+    // ✅ ИСПРАВЛЕННЫЙ МЕТОД: Начать игру с правильной логикой
+    async startGame(data: StartGameData): Promise<{ id: string; isNew: boolean }> {
+        try {
+            console.log('🎮 Starting game with data:', data);
+
+            // Сначала пробуем получить существующие игры для кампании
+            let existingGames: GameResponse[] = [];
+            try {
+                existingGames = await this.getGames({
+                    campaign_id: data.campaign_id,
+                    status_filter: 'active'
+                });
+            } catch (error) {
+                console.log('📝 No existing games found, will create new one');
+                existingGames = [];
+            }
+
+            // Если есть активная игра, присоединяемся к ней
+            if (existingGames && existingGames.length > 0) {
+                const activeGame = existingGames[0];
+                console.log('🔄 Joining existing game:', activeGame.id);
+
+                try {
+                    await this.joinGame(activeGame.id, { character_id: data.character_id });
+                    return { id: activeGame.id, isNew: false };
+                } catch (joinError) {
+                    console.log('❌ Failed to join existing game, creating new one');
+                }
+            }
+
+            // Создаем новую игру
+            console.log('🆕 Creating new game for campaign:', data.campaign_id);
+            const newGame = await this.createGame({
+                campaign_id: data.campaign_id,
+                name: `Игра`,
+                description: `Автоматически созданная игра`,
+                max_players: 6,
+            });
+
+            console.log('✅ New game created:', newGame.id);
+
+            // Присоединяемся к новой игре с персонажем
+            await this.joinGame(newGame.id, { character_id: data.character_id });
+
+            return { id: newGame.id, isNew: true };
+
+        } catch (error) {
+            console.error('❌ Error in startGame:', error);
+            throw error;
+        }
     }
 
-    // Получить список игр
-    async getGames(params: GetGamesParams = {}): Promise<GameResponse[]> {
-        const queryParams = {
-            status_filter: params.status_filter,
-            campaign_id: params.campaign_id,
-            limit: params.limit || 20,
-            offset: params.offset || 0,
-        };
+    // ✅ ИСПРАВЛЕННЫЙ МЕТОД: Создать игру (убираем /api префикс)
+    async createGame(data: CreateGameData): Promise<GameResponse> {
+        return apiService.post('/games', data);
+    }
 
-        return apiService.get('/games', queryParams);
+    // ✅ ИСПРАВЛЕННЫЙ МЕТОД: Получить список игр (убираем /api префикс)
+    async getGames(params: GetGamesParams = {}): Promise<GameResponse[]> {
+        const queryParams = new URLSearchParams();
+
+        if (params.status_filter) {
+            queryParams.append('status_filter', params.status_filter);
+        }
+        if (params.campaign_id) {
+            queryParams.append('campaign_id', params.campaign_id);
+        }
+        if (params.limit) {
+            queryParams.append('limit', params.limit.toString());
+        }
+        if (params.offset) {
+            queryParams.append('offset', params.offset.toString());
+        }
+
+        const queryString = queryParams.toString();
+        const url = queryString ? `/games?${queryString}` : '/games';
+
+        return apiService.get(url);
     }
 
     // Получить игры по кампании
@@ -130,179 +195,158 @@ class GameService {
         return this.getGames({ status_filter: 'active' });
     }
 
-    // ✅ КРИТИЧЕСКИ ВАЖНЫЙ МЕТОД: Получить игру по ID с retry
+    // ✅ ИСПРАВЛЕННЫЙ МЕТОД: Получить игру по ID (убираем /api префикс)
     async getGame(gameId: string): Promise<GameDetailResponse> {
-        return apiService.retryRequest(
-            () => apiService.getWithExtendedTimeout(`/games/${gameId}`, undefined, 45000),
-            3, // 3 попытки
-            2000 // 2 секунды между попытками
-        );
+        return apiService.get(`/games/${gameId}`);
     }
 
-    // Обновить игру
+    // ✅ ИСПРАВЛЕННЫЙ МЕТОД: Обновить игру (убираем /api префикс)
     async updateGame(gameId: string, data: UpdateGameData): Promise<GameDetailResponse> {
-        return apiService.retryRequest(() =>
-                apiService.put(`/games/${gameId}`, data),
-            2
-        );
+        return apiService.put(`/games/${gameId}`, data);
     }
 
-    // ✅ ПРИСОЕДИНЕНИЕ К ИГРЕ с retry
+    // ✅ ИСПРАВЛЕННЫЙ МЕТОД: Присоединиться к игре (убираем /api префикс)
     async joinGame(gameId: string, data: JoinGameData = {}): Promise<{ message: string }> {
-        return apiService.retryRequest(() =>
-                apiService.post(`/games/${gameId}/join`, data),
-            3
-        );
+        return apiService.post(`/games/${gameId}/join`, data);
     }
 
-    // Покинуть игру
+    // ✅ ИСПРАВЛЕННЫЙ МЕТОД: Покинуть игру (убираем /api префикс)
     async leaveGame(gameId: string): Promise<{ message: string }> {
         return apiService.post(`/games/${gameId}/leave`);
     }
 
     // Начать игровую сессию
-    async startGame(gameId: string): Promise<{ message: string }> {
+    async startSession(gameId: string): Promise<{ message: string }> {
         return apiService.post(`/games/${gameId}/start`);
     }
 
-    // Поставить игру на паузу
+    // Завершить игровую сессию
+    async endSession(gameId: string): Promise<{ message: string }> {
+        return apiService.post(`/games/${gameId}/end`);
+    }
+
+    // Приостановить игру
     async pauseGame(gameId: string): Promise<{ message: string }> {
         return apiService.post(`/games/${gameId}/pause`);
     }
 
-    // Завершить игру
-    async endGame(gameId: string): Promise<{ message: string }> {
-        return apiService.post(`/games/${gameId}/end`);
+    // Возобновить игру
+    async resumeGame(gameId: string): Promise<{ message: string }> {
+        return apiService.post(`/games/${gameId}/resume`);
     }
 
-    // ✅ ПОЛУЧЕНИЕ СООБЩЕНИЙ с retry
-    async getGameMessages(gameId: string, limit: number = 50, offset: number = 0): Promise<GameMessage[]> {
-        return apiService.retryRequest(() =>
-                apiService.get(`/games/${gameId}/messages`, { limit, offset }),
-            2
-        );
+    // Получить игроков игры
+    async getGamePlayers(gameId: string): Promise<GamePlayer[]> {
+        return apiService.get(`/games/${gameId}/players`);
     }
 
-    // Отправить сообщение в чат
-    async sendMessage(gameId: string, content: string, messageType: string = 'chat'): Promise<GameMessage> {
+    // Отправить сообщение в игровой чат
+    async sendMessage(gameId: string, message: string, messageType: string = 'chat'): Promise<void> {
         return apiService.post(`/games/${gameId}/messages`, {
-            content,
-            message_type: messageType,
+            message,
+            type: messageType,
         });
     }
 
     // Бросить кости
-    async rollDice(gameId: string, notation: string, purpose?: string, characterId?: string): Promise<DiceRollResult> {
-        return apiService.post(`/games/${gameId}/roll`, {
-            notation,
-            purpose,
-            character_id: characterId,
+    async rollDice(gameId: string, diceData: DiceRollData): Promise<DiceRollResult> {
+        return apiService.post(`/games/${gameId}/roll`, diceData);
+    }
+
+    // Получить ответ от AI DM
+    async getAiResponse(gameId: string, message: string, context?: any): Promise<AiDmResponse> {
+        return apiService.post(`/games/${gameId}/ai-response`, {
+            message,
+            context,
         });
     }
 
-    // Получить ответ от ИИ-мастера
-    async getAiResponse(gameId: string, playerMessage: string, context?: any): Promise<AiDmResponse> {
-        return apiService.postWithExtendedTimeout(`/games/${gameId}/ai-response`, {
-            message: playerMessage,
-            context,
-        }, 90000); // 90 секунд для ИИ ответов
+    // Обновить состояние игровой сессии
+    async updateSessionState(gameId: string, state: Partial<GameSessionState>): Promise<GameSessionState> {
+        return apiService.put(`/games/${gameId}/session-state`, state);
     }
 
-    // ✅ ИНИЦИАТИВА с retry
-    async rollInitiative(gameId: string, characterId: string): Promise<{ initiative: number }> {
-        return apiService.retryRequest(() =>
-                apiService.post(`/games/${gameId}/initiative`, {
-                    character_id: characterId,
-                }),
-            2
-        );
+    // Получить состояние игровой сессии
+    async getSessionState(gameId: string): Promise<GameSessionState> {
+        return apiService.get(`/games/${gameId}/session-state`);
     }
 
-    // Получить порядок инициативы
-    async getInitiativeOrder(gameId: string): Promise<InitiativeEntry[]> {
-        return apiService.get(`/games/${gameId}/initiative`);
+    // Обновить инициативу
+    async updateInitiative(gameId: string, initiative: InitiativeEntry[]): Promise<{ message: string }> {
+        return apiService.put(`/games/${gameId}/initiative`, { initiative });
     }
 
     // Следующий ход
-    async nextTurn(gameId: string): Promise<{ current_turn: string; turn_number: number }> {
+    async nextTurn(gameId: string): Promise<{ current_turn: InitiativeEntry }> {
         return apiService.post(`/games/${gameId}/next-turn`);
     }
 
-    // ✅ ПОЛУЧЕНИЕ СОСТОЯНИЯ ИГРЫ с retry
-    async getGameState(gameId: string): Promise<GameSessionState> {
-        return apiService.retryRequest(() =>
-                apiService.get(`/games/${gameId}/state`),
-            2
-        );
+    // Обновить HP персонажа
+    async updateCharacterHp(gameId: string, characterId: string, hp: number): Promise<{ message: string }> {
+        return apiService.put(`/games/${gameId}/characters/${characterId}/hp`, { hp });
     }
 
-    // Сохранить состояние игры
-    async saveGameState(gameId: string, state: Partial<GameSessionState>): Promise<{ message: string }> {
-        return apiService.post(`/games/${gameId}/save`, state);
-    }
-
-    // Загрузить сохранённое состояние
-    async loadGameState(gameId: string, saveId: string): Promise<GameSessionState> {
-        return apiService.post(`/games/${gameId}/load`, { save_id: saveId });
-    }
-
-    // ✅ ПОЛУЧЕНИЕ АКТИВНЫХ ИГРОКОВ с retry
-    async getActivePlayers(gameId: string): Promise<GamePlayer[]> {
-        return apiService.retryRequest(() =>
-                apiService.get(`/games/${gameId}/players`),
-            2
-        );
-    }
-
-    // Обновить HP персонажа в игре
-    async updateCharacterHP(gameId: string, characterId: string, hp: number): Promise<{ message: string }> {
-        return apiService.post(`/games/${gameId}/characters/${characterId}/hp`, {
-            current_hp: hp,
-        });
-    }
-
-    // Применить эффект к персонажу
-    async applyEffect(gameId: string, characterId: string, effect: any): Promise<{ message: string }> {
+    // Добавить эффект к персонажу
+    async addCharacterEffect(gameId: string, characterId: string, effect: any): Promise<{ message: string }> {
         return apiService.post(`/games/${gameId}/characters/${characterId}/effects`, effect);
     }
 
+    // Удалить эффект с персонажа
+    async removeCharacterEffect(gameId: string, characterId: string, effectId: string): Promise<{ message: string }> {
+        return apiService.delete(`/games/${gameId}/characters/${characterId}/effects/${effectId}`);
+    }
+
+    // Получить историю сообщений игры
+    async getGameHistory(gameId: string, limit: number = 50, offset: number = 0): Promise<GameMessage[]> {
+        return apiService.get(`/games/${gameId}/history?limit=${limit}&offset=${offset}`);
+    }
+
+    // Сохранить игру
+    async saveGame(gameId: string): Promise<{ message: string, save_id: string }> {
+        return apiService.post(`/games/${gameId}/save`);
+    }
+
+    // Загрузить игру
+    async loadGame(gameId: string, saveId: string): Promise<{ message: string }> {
+        return apiService.post(`/games/${gameId}/load`, { save_id: saveId });
+    }
+
     // Получить статистику игры
-    async getGameStats(gameId: string): Promise<{
-        session_duration: number;
-        messages_count: number;
-        rolls_count: number;
-        turns_count: number;
-    }> {
+    async getGameStats(gameId: string): Promise<any> {
         return apiService.get(`/games/${gameId}/stats`);
     }
 
-    // ✅ НОВЫЙ МЕТОД: Проверка доступности игры
-    async checkGameAvailability(gameId: string): Promise<boolean> {
-        try {
-            await this.getGame(gameId);
-            return true;
-        } catch (error: any) {
-            console.error('Game availability check failed:', error);
-            return false;
-        }
+    // Удалить игру
+    async deleteGame(gameId: string): Promise<{ message: string }> {
+        return apiService.delete(`/games/${gameId}`);
     }
 
-    // ✅ НОВЫЙ МЕТОД: Получение краткой информации об игре (без retry для быстрой проверки)
-    async getGameQuick(gameId: string): Promise<GameDetailResponse | null> {
-        try {
-            return await apiService.get(`/games/${gameId}`);
-        } catch (error: any) {
-            console.error('Quick game fetch failed:', error);
-            return null;
-        }
+    // Архивировать игру
+    async archiveGame(gameId: string): Promise<{ message: string }> {
+        return apiService.post(`/games/${gameId}/archive`);
     }
 
-    // ✅ НОВЫЙ МЕТОД: Проверка подключения к игре
-    async pingGame(gameId: string): Promise<{ status: string; players_online: number }> {
-        return apiService.get(`/games/${gameId}/ping`);
+    // Пригласить игрока в игру
+    async invitePlayer(gameId: string, userId: string): Promise<{ message: string }> {
+        return apiService.post(`/games/${gameId}/invite`, { user_id: userId });
+    }
+
+    // Исключить игрока из игры
+    async kickPlayer(gameId: string, userId: string): Promise<{ message: string }> {
+        return apiService.post(`/games/${gameId}/kick`, { user_id: userId });
+    }
+
+    // Обновить настройки игры
+    async updateGameSettings(gameId: string, settings: any): Promise<{ message: string }> {
+        return apiService.put(`/games/${gameId}/settings`, settings);
+    }
+
+    // Получить настройки игры
+    async getGameSettings(gameId: string): Promise<any> {
+        return apiService.get(`/games/${gameId}/settings`);
     }
 }
 
-// Экспорт синглтона
+// Экспортируем экземпляр сервиса
 export const gameService = new GameService();
 export default gameService;
