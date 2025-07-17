@@ -153,7 +153,23 @@ async def create_game(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to create game: {str(e)}"
         )
+@router.get("/test")
+async def test_route():
+    """Тестовый маршрут для проверки работы API"""
+    return {"message": "Games API is working", "timestamp": datetime.now().isoformat()}
 
+
+@router.post("/{game_id}/test-join")
+async def test_join_route(
+        game_id: str,
+        current_user: User = Depends(get_current_user)
+):
+    """Тестовый маршрут для проверки join functionality"""
+    return {
+        "message": f"Test join for game {game_id}",
+        "user": current_user.username,
+        "timestamp": datetime.now().isoformat()
+    }
 
 @router.get("/", response_model=List[GameResponse])
 async def get_games(
@@ -278,7 +294,7 @@ async def get_game(
         )
 
 
-@router.post("/{game_id}/join")
+router.post("/{game_id}/join")
 async def join_game(
         game_id: str,
         join_data: JoinGameData = JoinGameData(),
@@ -300,15 +316,28 @@ async def join_game(
                 detail="Game not found"
             )
 
-        # Проверяем можно ли присоединиться
-        if not game.can_join():
-            logger.error(f"Cannot join game {game_id}: game is full or not accepting players")
+        user_id = str(current_user.id)
+
+        # Проверяем статус игры - должна быть в ожидании или активной
+        if game.status not in [GameStatus.WAITING, GameStatus.ACTIVE]:
+            logger.error(f"Cannot join game {game_id}: game status is {game.status}")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Cannot join game: game is full or not accepting players"
+                detail="Cannot join game: game is not accepting new players"
             )
 
-        user_id = str(current_user.id)
+        # Проверяем лимит игроков
+        if game.current_players >= game.max_players:
+            logger.error(f"Cannot join game {game_id}: game is full ({game.current_players}/{game.max_players})")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot join game: game is full"
+            )
+
+        # Проверяем что игрок еще не в игре
+        if game.is_player_in_game(user_id):
+            logger.info(f"User {current_user.username} is already in game {game_id}")
+            return {"message": "Already in game"}
 
         # Проверяем что пользователь участник кампании
         campaign_query = select(Campaign).where(Campaign.id == game.campaign_id)
@@ -325,8 +354,54 @@ async def join_game(
                 detail="Only campaign participants can join the game"
             )
 
+        # Валидация персонажа если указан
+        character_id_to_use = None
+        if join_data.character_id:
+            character_id_to_use = str(join_data.character_id)
+
+            # Проверяем что персонаж существует и принадлежит пользователю
+            from app.models.character import Character
+            char_query = select(Character).where(
+                and_(
+                    Character.id == character_id_to_use,
+                    Character.owner_id == current_user.id
+                )
+            )
+            char_result = await db.execute(char_query)
+            character = char_result.scalar_one_or_none()
+
+            if not character:
+                logger.error(f"Character {character_id_to_use} not found or not owned by user {current_user.username}")
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Character not found or not owned by user"
+                )
+
+            # ✅ ИСПРАВЛЕНИЕ: Убираем проверку использования персонажа в других играх
+            # Разрешаем использовать одного персонажа в нескольких играх кампании
+            # Или делаем проверку менее строгой
+
+            # Опционально: проверяем только активные игры этой же кампании
+            same_campaign_games_query = select(Game).where(
+                and_(
+                    Game.campaign_id == game.campaign_id,
+                    Game.status.in_([GameStatus.ACTIVE]),
+                    Game.id != game_id
+                )
+            )
+            same_campaign_result = await db.execute(same_campaign_games_query)
+            same_campaign_games = same_campaign_result.scalars().all()
+
+            for other_game in same_campaign_games:
+                if (other_game.player_characters and
+                        user_id in other_game.player_characters and
+                        other_game.player_characters[user_id] == character_id_to_use):
+                    logger.warning(f"Character {character_id_to_use} is already used by user in another active game of this campaign")
+                    # Вместо ошибки, просто предупреждаем и продолжаем
+                    break
+
         # Присоединяем игрока к игре
-        if game.add_player(user_id, join_data.character_id):
+        if game.add_player(user_id, character_id_to_use):
             await db.commit()
             logger.info(f"User {current_user.username} successfully joined game {game_id}")
             return {"message": "Successfully joined game"}
@@ -346,7 +421,6 @@ async def join_game(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to join game: {str(e)}"
         )
-
 
 @router.post("/{game_id}/leave")
 async def leave_game(
@@ -392,6 +466,169 @@ async def leave_game(
             detail=f"Failed to leave game: {str(e)}"
         )
 
+@router.post("/{game_id}/join")
+async def join_game(
+        game_id: str,
+        join_data: JoinGameData = JoinGameData(),
+        current_user: User = Depends(get_current_user),
+        db: AsyncSession = Depends(get_db_session)
+):
+    """Присоединиться к игре с выбранным персонажем"""
+    try:
+        logger.info(f"User {current_user.username} joining game {game_id} with character {join_data.character_id}")
+
+        # Получаем игру
+        query = select(Game).where(Game.id == game_id)
+        result = await db.execute(query)
+        game = result.scalar_one_or_none()
+
+        if not game:
+            logger.error(f"Game {game_id} not found")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Game not found"
+            )
+
+        user_id = str(current_user.id)
+
+        # Проверяем статус игры
+        if game.status not in [GameStatus.WAITING, GameStatus.ACTIVE]:
+            logger.error(f"Cannot join game {game_id}: game status is {game.status}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot join game: game is not accepting new players"
+            )
+
+        # Проверяем лимит игроков
+        if game.current_players >= game.max_players:
+            logger.error(f"Cannot join game {game_id}: game is full ({game.current_players}/{game.max_players})")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot join game: game is full"
+            )
+
+        # Проверяем что игрок еще не в игре
+        if game.is_player_in_game(user_id):
+            logger.info(f"User {current_user.username} is already in game {game_id}")
+            return {"message": "Already in game"}
+
+        # Проверяем что пользователь участник кампании
+        campaign_query = select(Campaign).where(Campaign.id == game.campaign_id)
+        campaign_result = await db.execute(campaign_query)
+        campaign = campaign_result.scalar_one_or_none()
+
+        if not campaign:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Campaign not found"
+            )
+
+        is_creator = str(campaign.creator_id) == user_id
+        is_participant = user_id in (campaign.players or [])
+
+        if not (is_creator or is_participant):
+            logger.error(f"User {current_user.username} is not a participant of campaign {game.campaign_id}")
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only campaign participants can join the game"
+            )
+
+        # Валидация персонажа если указан
+        character_id_to_use = None
+        if join_data.character_id:
+            character_id_to_use = str(join_data.character_id)
+
+            # Проверяем что персонаж существует и принадлежит пользователю
+            from app.models.character import Character
+            char_query = select(Character).where(
+                and_(
+                    Character.id == character_id_to_use,
+                    Character.owner_id == current_user.id
+                )
+            )
+            char_result = await db.execute(char_query)
+            character = char_result.scalar_one_or_none()
+
+            if not character:
+                logger.error(f"Character {character_id_to_use} not found or not owned by user {current_user.username}")
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Character not found or not owned by user"
+                )
+
+        # Присоединяем игрока к игре
+        if game.add_player(user_id, character_id_to_use):
+            await db.commit()
+            logger.info(f"User {current_user.username} successfully joined game {game_id}")
+            return {"message": "Successfully joined game"}
+        else:
+            logger.error(f"Failed to add user {current_user.username} to game {game_id}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Failed to join game"
+            )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error joining game {game_id}: {str(e)}", exc_info=True)
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to join game: {str(e)}"
+        )
+
+
+
+@router.post("/{game_id}/leave")
+async def leave_game(
+        game_id: str,
+        current_user: User = Depends(get_current_user),
+        db: AsyncSession = Depends(get_db_session)
+):
+    """Покинуть игру"""
+    try:
+        logger.info(f"User {current_user.username} leaving game {game_id}")
+
+        query = select(Game).where(Game.id == game_id)
+        result = await db.execute(query)
+        game = result.scalar_one_or_none()
+
+        if not game:
+            logger.error(f"Game {game_id} not found")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Game not found"
+            )
+
+        user_id = str(current_user.id)
+
+        # Проверяем что игрок в игре
+        if not game.is_player_in_game(user_id):
+            logger.warning(f"User {current_user.username} is not in game {game_id}")
+            return {"message": "Not in game"}
+
+        # Удаляем игрока из игры
+        if game.remove_player(user_id):
+            await db.commit()
+            logger.info(f"User {current_user.username} successfully left game {game_id}")
+            return {"message": "Successfully left game"}
+        else:
+            logger.error(f"Failed to remove user {current_user.username} from game {game_id}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Failed to leave game"
+            )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error leaving game {game_id}: {str(e)}", exc_info=True)
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to leave game: {str(e)}"
+        )
 
 @router.post("/{game_id}/start")
 async def start_game(

@@ -1,3 +1,5 @@
+# backend/app/models/game.py - ИСПРАВЛЕННАЯ ВЕРСИЯ
+
 from sqlalchemy import Column, String, Integer, Text, ForeignKey, Enum as SQLEnum
 from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.postgresql import JSONB, UUID
@@ -38,7 +40,9 @@ class Game(BaseModel):
     turn_info = Column(JSONB, default={
         "current_turn": 0,
         "initiative_order": [],
-        "round_number": 1
+        "round_number": 1,
+        "current_player_index": 0,
+        "current_player_id": None
     }, nullable=False)
 
     # Настройки игры
@@ -62,6 +66,203 @@ class Game(BaseModel):
 
     def __repr__(self):
         return f"<Game(name='{self.name}', status='{self.status}', players={self.current_players}/{self.max_players})>"
+
+    # ✅ НОВЫЕ СВОЙСТВА для обратной совместимости с существующим кодом
+    @property
+    def current_turn(self) -> int:
+        """Получить текущий ход из turn_info"""
+        if self.turn_info:
+            return self.turn_info.get("current_turn", 0)
+        return 0
+
+    @current_turn.setter
+    def current_turn(self, value: int):
+        """Установить текущий ход в turn_info"""
+        if not self.turn_info:
+            self.turn_info = {}
+        self.turn_info["current_turn"] = value
+
+    @property
+    def current_player_index(self) -> int:
+        """Получить индекс текущего игрока из turn_info"""
+        if self.turn_info:
+            return self.turn_info.get("current_player_index", 0)
+        return 0
+
+    @current_player_index.setter
+    def current_player_index(self, value: int):
+        """Установить индекс текущего игрока в turn_info"""
+        if not self.turn_info:
+            self.turn_info = {}
+        self.turn_info["current_player_index"] = value
+
+    @property
+    def round_number(self) -> int:
+        """Получить номер раунда из turn_info"""
+        if self.turn_info:
+            return self.turn_info.get("round_number", 1)
+        return 1
+
+    @round_number.setter
+    def round_number(self, value: int):
+        """Установить номер раунда в turn_info"""
+        if not self.turn_info:
+            self.turn_info = {}
+        self.turn_info["round_number"] = value
+
+    @property
+    def initiative_order(self) -> list:
+        """Получить порядок инициативы из turn_info"""
+        if self.turn_info:
+            return self.turn_info.get("initiative_order", [])
+        return []
+
+    @initiative_order.setter
+    def initiative_order(self, value: list):
+        """Установить порядок инициативы в turn_info"""
+        if not self.turn_info:
+            self.turn_info = {}
+        self.turn_info["initiative_order"] = value
+
+    def get_current_player(self) -> str:
+        """Получить ID текущего игрока"""
+        if self.turn_info:
+            current_player_id = self.turn_info.get("current_player_id")
+            if current_player_id:
+                return current_player_id
+
+            # Если нет явного ID, пытаемся получить из порядка инициативы
+            initiative_order = self.turn_info.get("initiative_order", [])
+            current_index = self.turn_info.get("current_player_index", 0)
+
+            if initiative_order and 0 <= current_index < len(initiative_order):
+                return initiative_order[current_index].get("player_id", "")
+
+        return ""
+
+    def set_current_player(self, player_id: str):
+        """Установить текущего игрока"""
+        if not self.turn_info:
+            self.turn_info = {}
+        self.turn_info["current_player_id"] = player_id
+
+    def next_turn(self):
+        """Перейти к следующему ходу"""
+        if not self.turn_info:
+            self.turn_info = {
+                "current_turn": 0,
+                "initiative_order": [],
+                "round_number": 1,
+                "current_player_index": 0
+            }
+
+        # Увеличиваем номер хода
+        self.turn_info["current_turn"] = self.turn_info.get("current_turn", 0) + 1
+
+        # Переход к следующему игроку в порядке инициативы
+        initiative_order = self.turn_info.get("initiative_order", [])
+        if initiative_order:
+            current_index = self.turn_info.get("current_player_index", 0)
+            next_index = (current_index + 1) % len(initiative_order)
+
+            # Если мы прошли полный круг, увеличиваем номер раунда
+            if next_index == 0:
+                self.turn_info["round_number"] = self.turn_info.get("round_number", 1) + 1
+
+            self.turn_info["current_player_index"] = next_index
+
+            # Устанавливаем ID текущего игрока
+            if next_index < len(initiative_order):
+                self.turn_info["current_player_id"] = initiative_order[next_index].get("player_id")
+
+    def add_player(self, user_id: str, character_id: str = None) -> bool:
+        """Добавить игрока в игру"""
+        user_id = str(user_id)
+
+        # Проверяем лимит игроков
+        if self.current_players >= self.max_players:
+            return False
+
+        # Проверяем, что игрок еще не в игре
+        if user_id in (self.players or []):
+            return False
+
+        # Добавляем игрока
+        if not self.players:
+            self.players = []
+        self.players.append(user_id)
+
+        # Добавляем персонажа если указан
+        if character_id:
+            character_id = str(character_id)
+            if not self.characters:
+                self.characters = []
+            if character_id not in self.characters:
+                self.characters.append(character_id)
+
+            # Связываем игрока с персонажем
+            if not self.player_characters:
+                self.player_characters = {}
+            self.player_characters[user_id] = character_id
+
+        # Обновляем счетчик игроков
+        self.current_players = len(self.players)
+
+        return True
+
+    def remove_player(self, user_id: str) -> bool:
+        """Удалить игрока из игры"""
+        user_id = str(user_id)
+
+        if not self.players or user_id not in self.players:
+            return False
+
+        # Удаляем игрока из списка
+        self.players.remove(user_id)
+
+        # Удаляем связь с персонажем
+        if self.player_characters and user_id in self.player_characters:
+            character_id = self.player_characters[user_id]
+            del self.player_characters[user_id]
+
+            # Удаляем персонажа из списка если больше никто его не использует
+            if self.characters and character_id in self.characters:
+                if character_id not in self.player_characters.values():
+                    self.characters.remove(character_id)
+
+        # Обновляем счетчик игроков
+        self.current_players = len(self.players)
+
+        # Удаляем из порядка инициативы если есть
+        if self.turn_info and "initiative_order" in self.turn_info:
+            self.turn_info["initiative_order"] = [
+                entry for entry in self.turn_info["initiative_order"]
+                if entry.get("player_id") != user_id
+            ]
+
+        return True
+
+    def get_player_character_id(self, user_id: str) -> str:
+        """Получить ID персонажа игрока"""
+        if self.player_characters:
+            return self.player_characters.get(str(user_id), "")
+        return ""
+
+    def is_player_in_game(self, user_id: str) -> bool:
+        """Проверить, находится ли игрок в игре"""
+        return str(user_id) in (self.players or [])
+
+    def can_join(self) -> bool:
+        """Проверить, можно ли присоединиться к игре"""
+        # Игра должна быть в статусе ожидания или активной
+        if self.status not in [GameStatus.WAITING, GameStatus.ACTIVE]:
+            return False
+
+        # Должно быть свободное место
+        if self.current_players >= self.max_players:
+            return False
+
+        return True
 
     # ✅ ИСПРАВЛЕННЫЙ МЕТОД: Базовая информация об игре
     def get_game_info(self) -> dict:
@@ -101,107 +302,3 @@ class Game(BaseModel):
         }
 
         return detailed_info
-
-    def add_player(self, user_id: str, character_id: str = None) -> bool:
-        """Добавить игрока в игру с персонажем"""
-        if self.current_players >= self.max_players:
-            return False
-
-        user_id_str = str(user_id)
-        players_list = list(self.players) if self.players else []
-
-        if user_id_str not in players_list:
-            players_list.append(user_id_str)
-            self.players = players_list
-            self.current_players += 1
-
-            # Связываем игрока с персонажем
-            if character_id:
-                player_chars = dict(self.player_characters) if self.player_characters else {}
-                player_chars[user_id_str] = str(character_id)
-                self.player_characters = player_chars
-
-                # Добавляем персонажа в список персонажей игры
-                characters_list = list(self.characters) if self.characters else []
-                character_id_str = str(character_id)
-                if character_id_str not in characters_list:
-                    characters_list.append(character_id_str)
-                    self.characters = characters_list
-
-            return True
-        return False
-
-    def remove_player(self, user_id: str) -> bool:
-        """Удалить игрока из игры"""
-        user_id_str = str(user_id)
-        players_list = list(self.players) if self.players else []
-
-        if user_id_str in players_list:
-            players_list.remove(user_id_str)
-            self.players = players_list
-            self.current_players -= 1
-
-            # Убираем связь игрок-персонаж
-            if self.player_characters and user_id_str in self.player_characters:
-                player_chars = dict(self.player_characters)
-                character_id = player_chars.pop(user_id_str, None)
-                self.player_characters = player_chars
-
-                # Убираем персонажа из списка персонажей игры
-                if character_id and self.characters:
-                    characters_list = list(self.characters)
-                    if character_id in characters_list:
-                        characters_list.remove(character_id)
-                        self.characters = characters_list
-
-            return True
-        return False
-
-    def can_join(self) -> bool:
-        """Можно ли присоединиться к игре"""
-        return (self.status in [GameStatus.WAITING, GameStatus.ACTIVE] and
-                self.current_players < self.max_players)
-
-    def start_game(self) -> bool:
-        """Начать игру"""
-        if self.status == GameStatus.WAITING and self.current_players > 0:
-            self.status = GameStatus.ACTIVE
-            return True
-        return False
-
-    def pause_game(self) -> bool:
-        """Приостановить игру"""
-        if self.status == GameStatus.ACTIVE:
-            self.status = GameStatus.PAUSED
-            return True
-        return False
-
-    def resume_game(self) -> bool:
-        """Возобновить игру"""
-        if self.status == GameStatus.PAUSED:
-            self.status = GameStatus.ACTIVE
-            return True
-        return False
-
-    def end_game(self) -> bool:
-        """Завершить игру"""
-        if self.status in [GameStatus.ACTIVE, GameStatus.PAUSED]:
-            self.status = GameStatus.ENDED
-            return True
-        return False
-
-    def update_scene(self, scene_description: str):
-        """Обновить текущую сцену"""
-        self.current_scene = scene_description
-
-    def add_message(self):
-        """Увеличить счетчик сообщений"""
-        self.total_messages += 1
-
-    def add_dice_roll(self):
-        """Увеличить счетчик бросков костей"""
-        self.total_dice_rolls += 1
-
-    def update_session_duration(self, minutes: int):
-        """Обновить продолжительность сессии"""
-        self.session_duration += minutes

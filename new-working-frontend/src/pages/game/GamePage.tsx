@@ -485,7 +485,7 @@ const GamePage = () => {
                 const gameData = await gameService.getGame(gameId);
                 if (isCleanedUp) return;
 
-                loadGame(gameData);
+                loadGame(gameId);
 
                 // ✅ Подключаемся к WebSocket с обработчиком персонажей
                 if (!isConnected && !isConnecting) {

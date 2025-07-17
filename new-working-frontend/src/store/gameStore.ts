@@ -1,3 +1,5 @@
+// new-working-frontend/src/store/gameStore.ts - ПОЛНАЯ ИСПРАВЛЕННАЯ ВЕРСИЯ
+
 import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
 import { websocketService } from '@/services/websocketService';
@@ -39,7 +41,8 @@ interface GameState {
     disconnectFromGame: () => Promise<void>;
     joinGame: (gameId: string) => Promise<void>;
     leaveGame: () => Promise<void>;
-    loadGame: (gameId: string) => Promise<void>;
+    // ✅ ОБНОВЛЕННАЯ СИГНАТУРА: поддержка строки или объекта
+    loadGame: (gameId: string | Game) => Promise<Game>;
     clearGame: () => void;
     sendMessage: (content: string, isOOC?: boolean) => void;
     sendAction: (action: string) => void;
@@ -86,18 +89,37 @@ export const useGameStore = create<GameState>()(
         selectedCharacterId: null,
 
         // ✅ ИСПРАВЛЕННЫЙ МЕТОД: Загрузка игры
-        loadGame: async (gameId: string) => {
+        loadGame: async (gameId: string | Game) => {
             try {
-                console.log('Loading game:', gameId);
-                const game = await gameService.getGame(gameId);
+                // ✅ ИСПРАВЛЕНИЕ: Обработка и строки и объекта
+                let actualGameId: string;
+                let gameData: Game;
+
+                if (typeof gameId === 'string') {
+                    // Если передана строка - загружаем игру по ID
+                    console.log('Loading game by ID:', gameId);
+                    actualGameId = gameId;
+                    gameData = await gameService.getGame(gameId);
+                } else if (typeof gameId === 'object' && gameId !== null && 'id' in gameId) {
+                    // Если передан объект игры - используем его
+                    console.log('Using game object:', gameId);
+                    actualGameId = gameId.id;
+                    gameData = gameId;
+                } else {
+                    // Неправильный тип
+                    console.error('❌ Invalid gameId provided to loadGame:', gameId, typeof gameId);
+                    throw new Error('Некорректный ID игры');
+                }
+
+                console.log('✅ Game loaded successfully:', gameData);
 
                 set({
-                    currentGame: game,
+                    currentGame: gameData,
                     connectionError: null,
                 });
 
-                console.log('Game loaded successfully:', game);
-                return game;
+                return gameData;
+
             } catch (error: any) {
                 console.error('Failed to load game:', error);
                 set({
@@ -109,166 +131,193 @@ export const useGameStore = create<GameState>()(
             }
         },
 
-        // ✅ УЛУЧШЕННОЕ ПОДКЛЮЧЕНИЕ К ИГРЕ
-        connectToGame: async (gameId: string) => {
+        // ✅ ИСПРАВЛЕННЫЙ МЕТОД: Присоединение к игре
+        joinGame: async (gameId: string) => {
+            // ✅ ИСПРАВЛЕНИЕ: Проверяем тип gameId
+            if (!gameId || typeof gameId !== 'string') {
+                console.error('❌ Invalid gameId provided to joinGame:', gameId, typeof gameId);
+                throw new Error('Некорректный ID игры');
+            }
+
+            try {
+                console.log('🚪 Joining game:', gameId);
+                await gameService.joinGame(gameId);
+
+                // Перезагружаем данные игры после присоединения
+                await get().loadGame(gameId);
+
+                console.log('✅ Successfully joined game');
+            } catch (error: any) {
+                console.error('❌ Failed to join game:', error);
+                set({ connectionError: error.message || 'Не удалось присоединиться к игре' });
+                throw error;
+            }
+        },
+
+        // ✅ ИСПРАВЛЕННЫЙ МЕТОД: Покинуть игру
+        leaveGame: async () => {
             const { currentGame } = get();
+            if (!currentGame) return;
+
+            try {
+                console.log('🚪 Leaving game:', currentGame.id);
+                await gameService.leaveGame(currentGame.id);
+                get().clearGame();
+                console.log('✅ Successfully left game');
+            } catch (error: any) {
+                console.error('❌ Failed to leave game:', error);
+                set({ connectionError: error.message || 'Не удалось покинуть игру' });
+                throw error;
+            }
+        },
+
+        // ✅ СОХРАНЕННЫЙ МЕТОД: Очистка игры
+        clearGame: () => {
+            console.log('🧹 Clearing game state');
+            set({
+                currentGame: null,
+                messages: [],
+                chatMessages: [],
+                playersOnline: [],
+                players: [],
+                activePlayers: [],
+                currentScene: null,
+                currentTurn: null,
+                turnNumber: 1,
+                initiativeOrder: [],
+                lastDiceRoll: null,
+                connectionError: null
+            });
+        },
+
+        // ✅ ИСПРАВЛЕННЫЙ МЕТОД: Подключение к игре
+        connectToGame: async (gameId: string) => {
+            // ✅ ИСПРАВЛЕНИЕ: Проверяем тип gameId
+            if (!gameId || typeof gameId !== 'string') {
+                console.error('❌ Invalid gameId provided to connectToGame:', gameId, typeof gameId);
+                set({ connectionError: 'Некорректный ID игры' });
+                return;
+            }
 
             set({ isConnecting: true, connectionError: null });
 
             try {
-                // ✅ Сначала загружаем игру, если её нет
-                let game = currentGame;
-                if (!game) {
-                    console.log('No game loaded, loading first...');
-                    try {
-                        game = await get().loadGame(gameId);
-                    } catch (loadError) {
-                        console.log('Failed to load game, will try WebSocket anyway');
-                        // Продолжаем попытку подключения к WebSocket даже если не удалось загрузить игру
-                    }
-                }
-
-                // Затем подключаемся к WebSocket
+                console.log('🔌 Connecting to game WebSocket:', gameId);
                 await websocketService.connect(gameId);
 
                 // Setup WebSocket event listeners
                 websocketService.on('connected', (data) => {
-                    console.log('WebSocket connected, received data:', data);
-                    const players = data.players_online || [];
+                    console.log('✅ WebSocket connected:', data);
                     set({
                         isConnected: true,
                         isConnecting: false,
                         connectionError: null,
-                        playersOnline: players,
-                        players: players,
-                        activePlayers: players.filter((p: GamePlayer) => p.is_online),
+                        playersOnline: data.players_online || [],
                     });
+                });
 
-                    // ✅ Если игра всё ещё не загружена, попробуем ещё раз
-                    const { currentGame: currentGameAfterWS } = get();
-                    if (!currentGameAfterWS && gameId) {
-                        console.log('Game still not loaded after WebSocket, attempting to load...');
-                        get().loadGame(gameId).catch((loadError) => {
-                            console.error('Failed to load game after WebSocket connection:', loadError);
-                            // Не считаем это критической ошибкой, так как WebSocket уже подключен
+                websocketService.on('player_joined', (data) => {
+                    console.log('👤 Player joined:', data);
+                    const { playersOnline } = get();
+                    const existingPlayer = playersOnline.find(p => p.user_id === data.user_id);
+
+                    if (!existingPlayer) {
+                        set({
+                            playersOnline: [...playersOnline, data],
+                            players: [...playersOnline, data],
+                            activePlayers: [...playersOnline, data]
                         });
                     }
                 });
 
-                websocketService.on('player_joined', (data) => {
-                    const { playersOnline } = get();
-                    const updatedPlayers = [...playersOnline];
-                    const existingIndex = updatedPlayers.findIndex(p => p.user_id === data.user_id);
+                websocketService.on('player_left', (data) => {
+                    console.log('👋 Player left:', data);
+                    set((state) => ({
+                        playersOnline: state.playersOnline.filter(p => p.user_id !== data.user_id),
+                        players: state.players.filter(p => p.user_id !== data.user_id),
+                        activePlayers: state.activePlayers.filter(p => p.user_id !== data.user_id)
+                    }));
+                });
 
-                    if (existingIndex >= 0) {
-                        updatedPlayers[existingIndex] = { ...updatedPlayers[existingIndex], is_online: true };
-                    } else {
-                        updatedPlayers.push(data);
+                // ✅ ДОБАВЛЕНО: Обработка состояния игры
+                websocketService.on('game_state', (data) => {
+                    console.log('🎮 Game state received:', data);
+
+                    const updates: any = {};
+
+                    if (data.players) {
+                        const playersArray = Array.isArray(data.players) ? data.players : Object.values(data.players);
+                        updates.players = playersArray;
+                        updates.activePlayers = playersArray;
+                        updates.playersOnline = playersArray;
                     }
 
-                    set({
-                        playersOnline: updatedPlayers,
-                        players: updatedPlayers,
-                        activePlayers: updatedPlayers.filter((p: GamePlayer) => p.is_online),
-                    });
+                    if (data.current_scene !== undefined) {
+                        updates.currentScene = data.current_scene;
+                    }
+
+                    if (data.turn_info) {
+                        updates.currentTurn = data.turn_info.current_player_id;
+                        updates.turnNumber = data.turn_info.current_turn || 1;
+                        updates.initiativeOrder = data.turn_info.initiative_order || [];
+                    }
+
+                    if (Object.keys(updates).length > 0) {
+                        set(updates);
+                    }
                 });
 
-                websocketService.on('player_left', (data) => {
-                    const { playersOnline } = get();
-                    const updatedPlayers = playersOnline.map(p =>
-                        p.user_id === data.user_id ? { ...p, is_online: false } : p
-                    );
-
-                    set({
-                        playersOnline: updatedPlayers,
-                        players: updatedPlayers,
-                        activePlayers: updatedPlayers.filter((p: GamePlayer) => p.is_online),
-                    });
-                });
-
-                // ✅ НОВЫЙ: Обработчик чат сообщений
-                websocketService.on('chat_message', (data: any) => {
-                    console.log('Received chat message:', data);
-
-                    const chatMessage: GameMessage = {
-                        id: `chat-${Date.now()}`,
-                        type: 'chat' as const,
-                        sender: data.sender_name || 'Unknown',
+                websocketService.on('chat_message', (data) => {
+                    console.log('💬 Chat message received:', data);
+                    get().addChatMessage({
+                        id: Date.now().toString(),
+                        type: 'chat',
                         content: data.content,
-                        timestamp: data.timestamp,
-                    };
-
-                    // ✅ Добавляем ТОЛЬКО в чат
-                    get().addChatMessage(chatMessage);
+                        sender_name: data.sender_name,
+                        sender_username: data.sender_username,
+                        sender_id: data.sender_id,
+                        timestamp: data.timestamp || new Date().toISOString()
+                    });
                 });
 
-                // ✅ НОВЫЙ: Обработчик действий игрока
                 websocketService.on('player_action', (data) => {
-                    console.log('Received player action:', data);
+                    console.log('⚔️ Player action received:', data);
                     get().addMessage({
-                        id: `action-${Date.now()}`,
-                        content: data.action,
-                        message_type: 'action',
-                        author: data.player_name,
-                        timestamp: data.timestamp,
-                        is_ooc: false,
-                    });
-                });
-
-                // ✅ НОВЫЙ: Обработчик ответов ИИ
-                websocketService.on('ai_response', (data) => {
-                    console.log('Received AI response:', data);
-                    get().addMessage({
-                        id: `ai-${Date.now()}`,
-                        content: data.message,
-                        message_type: 'dm',
-                        author: data.sender_name || 'ИИ Мастер',
-                        timestamp: data.timestamp,
-                        is_ooc: false,
-                    });
-                });
-
-                websocketService.on('message', (data) => {
-                    get().addMessage(data);
-                });
-
-                websocketService.on('dice_rolled', (data) => {
-                    set({ lastDiceRoll: data });
-                    // Также добавляем сообщение в чат
-                    get().addMessage({
-                        id: `dice-${Date.now()}`,
-                        content: `🎲 ${data.notation}: ${data.result}`,
-                        message_type: 'dice',
-                        author: data.player_name || 'Unknown',
-                        character_name: data.character_name,
-                        timestamp: new Date().toISOString(),
-                        is_ooc: false,
+                        id: Date.now().toString(),
+                        type: 'action',
+                        content: `${data.character_name} выполняет: ${data.action}`,
+                        sender_name: data.character_name,
+                        sender_id: data.player_id,
+                        timestamp: data.timestamp || new Date().toISOString()
                     });
                 });
 
                 websocketService.on('dice_roll', (data) => {
+                    console.log('🎲 Dice roll received:', data);
                     set({ lastDiceRoll: data });
-                    // Также добавляем сообщение в чат
                     get().addMessage({
-                        id: `dice-${Date.now()}`,
-                        content: `🎲 ${data.notation || data.result}`,
-                        message_type: 'dice',
-                        author: data.player_name || 'Unknown',
+                        id: Date.now().toString(),
+                        type: 'dice_roll',
+                        content: `${data.character_name} бросает ${data.notation}: ${data.total}`,
+                        sender_name: data.character_name,
+                        sender_id: data.player_id,
                         timestamp: data.timestamp || new Date().toISOString(),
-                        is_ooc: false,
+                        dice_roll: data
                     });
                 });
 
-                websocketService.on('game_updated', (data) => {
-                    set({
-                        currentScene: data.current_scene,
-                        currentTurn: data.current_turn,
-                        turnNumber: data.turn_number || get().turnNumber,
+                websocketService.on('system', (data) => {
+                    console.log('📢 System message received:', data);
+                    get().addMessage({
+                        id: Date.now().toString(),
+                        type: 'system',
+                        content: data.message,
+                        timestamp: data.timestamp || new Date().toISOString()
                     });
                 });
 
                 websocketService.on('error', (data) => {
-                    console.error('Game WebSocket error:', data);
+                    console.error('❌ WebSocket error:', data);
                     set({
                         connectionError: data.message || 'Ошибка соединения',
                         isConnected: false,
@@ -276,149 +325,8 @@ export const useGameStore = create<GameState>()(
                     });
                 });
 
-                websocketService.on('disconnected', () => {
-                    set({
-                        isConnected: false,
-                        isConnecting: false,
-                    });
-                });
-
-                // ✅ НОВЫЙ: Обработчик ответов ИИ Мастера
-                websocketService.on('ai_response', (data: any) => {
-                    console.log('Received AI response:', data);
-
-                    const aiMessage: GameMessage = {
-                        id: `ai-${Date.now()}`,
-                        type: 'dm' as const,
-                        author: data.sender_name || 'ИИ Мастер',
-                        content: data.message,
-                        timestamp: new Date(data.timestamp || Date.now()),
-                        metadata: {
-                            in_response_to: data.in_response_to,
-                            responding_to_player: data.responding_to_player,
-                            is_fallback: data.is_fallback
-                        }
-                    };
-
-                    get().addMessage(aiMessage);
-                });
-
-                // ✅ УЛУЧШЕННЫЙ: Обработчик запросов на бросок кубиков
-                websocketService.on('roll_request', (data: any) => {
-                    console.log('Received roll request:', data);
-
-                    // Создаем сообщение с четкими инструкциями
-                    const rollRequestMessage: GameMessage = {
-                        id: `roll-request-${Date.now()}`,
-                        type: 'system' as const,
-                        author: data.sender_name || 'ИИ Мастер',
-                        content: data.message, // Уже содержит инструкцию "бросьте d20!"
-                        timestamp: new Date(data.timestamp || Date.now()),
-                        metadata: {
-                            requires_dice_roll: data.requires_dice_roll,
-                            roll_type: data.roll_type,
-                            ability_or_skill: data.ability_or_skill,
-                            skill_display: data.skill_display,
-                            dice_notation: data.dice_notation,
-                            dice_instruction: data.dice_instruction, // ✅ НОВОЕ: четкая инструкция
-                            modifier: data.modifier,
-                            advantage: data.advantage,
-                            disadvantage: data.disadvantage,
-                            original_action: data.original_action,
-                            requesting_player: data.requesting_player,
-                            auto_modifier: data.auto_modifier
-                        }
-                    };
-
-                    get().addMessage(rollRequestMessage);
-
-                    // Автоматически открываем роллер кубиков
-                    set({ showDiceRoller: true });
-
-                    // Показываем уведомление с инструкцией
-                    console.log(`${data.skill_display}: ${data.dice_instruction}`);
-                });
-
-                // ✅ УЛУЧШЕННЫЙ: Обработчик результатов проверок кубиков
-                websocketService.on('dice_check_result', (data: any) => {
-                    console.log('Received dice check result:', data);
-
-                    // Показываем результат с детальной информацией о броске
-                    const checkResultMessage: GameMessage = {
-                        id: `check-result-${Date.now()}`,
-                        type: 'dm' as const,
-                        author: data.sender_name || 'ИИ Мастер',
-                        content: data.message,
-                        timestamp: new Date(data.timestamp || Date.now()),
-                        metadata: {
-                            is_dice_check_result: data.is_dice_check_result,
-                            base_roll: data.base_roll,
-                            modifier: data.modifier,
-                            final_total: data.final_total,
-                            success: data.success,
-                            original_action: data.original_action,
-                            player_name: data.player_name,
-                            skill_display: data.skill_display
-                        }
-                    };
-
-                    get().addMessage(checkResultMessage);
-
-                    // Показываем детальный результат в консоли
-                    const successIcon = data.success ? '🎯' : '❌';
-                    const resultText = data.success ? 'Успех!' : 'Неудача';
-                    const rollDetails = `${data.base_roll}+${data.modifier}=${data.final_total}`;
-                    console.log(`${successIcon} ${resultText} ${data.skill_display}: ${rollDetails}`);
-                });
-
-                // ✅ УЛУЧШЕННЫЙ: Обработчик обычных бросков кубиков
-                websocketService.on('dice_roll', (data: any) => {
-                    console.log('Received dice roll:', data);
-
-                    // Различаем проверки навыков и обычные броски
-                    let content: string;
-                    if (data.is_skill_check) {
-                        // Для проверок навыков показываем только базовый результат d20
-                        content = `🎲 **${data.player_name}** бросил d20: **${data.result.total}** *(${data.purpose})*`;
-                    } else {
-                        // Для обычных бросков показываем полный результат
-                        content = `🎲 **${data.player_name}** бросил ${data.notation}: **${data.result.total}**`;
-                        if (data.result.details) {
-                            content += ` *(${data.result.details})*`;
-                        }
-                    }
-
-                    const diceMessage: GameMessage = {
-                        id: `dice-${Date.now()}`,
-                        type: 'dice' as const,
-                        author: data.player_name,
-                        content: content,
-                        timestamp: new Date(data.timestamp || Date.now()),
-                        metadata: {
-                            notation: data.notation,
-                            result: data.result,
-                            player_id: data.player_id,
-                            purpose: data.purpose,
-                            is_skill_check: data.is_skill_check
-                        }
-                    };
-
-                    get().addMessage(diceMessage);
-
-                    // Сохраняем последний бросок в стор
-                    set({
-                        lastDiceRoll: {
-                            notation: data.notation,
-                            result: data.result,
-                            timestamp: data.timestamp,
-                            player: data.player_name,
-                            is_skill_check: data.is_skill_check
-                        }
-                    });
-                });
-
             } catch (error: any) {
-                console.error('Failed to connect to game:', error);
+                console.error('❌ Failed to connect to game:', error);
                 set({
                     isConnecting: false,
                     connectionError: error.message || 'Не удалось подключиться к игре',
@@ -428,38 +336,10 @@ export const useGameStore = create<GameState>()(
             }
         },
 
-        // ✅ НОВЫЙ МЕТОД: Присоединение к игре
-        joinGame: async (gameId: string) => {
-            try {
-                await gameService.joinGame(gameId);
-                await get().connectToGame(gameId);
-            } catch (error: any) {
-                console.error('Failed to join game:', error);
-                set({ connectionError: error.message || 'Не удалось присоединиться к игре' });
-            }
-        },
-
-        // ✅ НОВЫЙ МЕТОД: Покинуть игру
-        leaveGame: async () => {
-            try {
-                const { currentGame } = get();
-                if (currentGame) {
-                    await gameService.leaveGame(currentGame.id);
-                }
-                await get().disconnectFromGame();
-            } catch (error: any) {
-                console.error('Failed to leave game:', error);
-            }
-        },
-
-        // ✅ НОВЫЙ МЕТОД: Очистка игры
-        clearGame: () => {
-            get().clearGameState();
-        },
-
-        // Disconnect from game
+        // ✅ СОХРАНЕННЫЙ МЕТОД: Отключение от игры
         disconnectFromGame: async () => {
             try {
+                console.log('🔌 Disconnecting from WebSocket');
                 await websocketService.disconnect();
             } finally {
                 set({
@@ -470,59 +350,101 @@ export const useGameStore = create<GameState>()(
             }
         },
 
-        // Send chat message
+        // ✅ СОХРАНЕННЫЙ МЕТОД: Отправка сообщения
         sendMessage: (content: string, isOOC: boolean = false) => {
-            const { selectedCharacterId } = get();
-            websocketService.sendChatMessage(content, isOOC, selectedCharacterId || undefined);
-            set({ chatInput: '' });
+            const { selectedCharacterId, isConnected } = get();
+
+            if (!isConnected) {
+                console.warn('⚠️ Cannot send message: not connected to WebSocket');
+                return;
+            }
+
+            try {
+                websocketService.sendChatMessage(content, isOOC, selectedCharacterId || undefined);
+                set({ chatInput: '' });
+                console.log('💬 Message sent:', content.substring(0, 50));
+            } catch (error: any) {
+                console.error('❌ Failed to send message:', error);
+            }
         },
 
-        // Send player action
+        // ✅ СОХРАНЕННЫЙ МЕТОД: Отправка действия
         sendAction: (action: string) => {
-            const { selectedCharacterId } = get();
-            websocketService.sendPlayerAction(action, selectedCharacterId || undefined);
+            const { selectedCharacterId, isConnected } = get();
+
+            if (!isConnected) {
+                console.warn('⚠️ Cannot send action: not connected to WebSocket');
+                return;
+            }
+
+            try {
+                websocketService.sendPlayerAction(action, selectedCharacterId || undefined);
+                console.log('⚔️ Action sent:', action.substring(0, 50));
+            } catch (error: any) {
+                console.error('❌ Failed to send action:', error);
+            }
         },
 
-        // Roll dice
+        // ✅ ИСПРАВЛЕННЫЙ МЕТОД: Бросок кубиков
         rollDice: async (
             notation: string,
             purpose?: string,
             advantage?: boolean,
             disadvantage?: boolean
         ) => {
-            const { currentGame, selectedCharacterId } = get();
-            if (!currentGame) return;
+            const { currentGame, selectedCharacterId, isConnected } = get();
+
+            if (!currentGame) {
+                console.warn('⚠️ Cannot roll dice: no current game');
+                return;
+            }
+
+            if (!isConnected) {
+                console.warn('⚠️ Cannot roll dice: not connected to WebSocket');
+                return;
+            }
 
             try {
-                websocketService.sendDiceRoll(notation, purpose, selectedCharacterId || undefined, advantage, disadvantage);
+                const rollData: DiceRollData = {
+                    notation,
+                    purpose,
+                    character_id: selectedCharacterId || undefined,
+                    advantage,
+                    disadvantage
+                };
+
+                websocketService.sendDiceRoll(rollData);
+                console.log('🎲 Dice roll sent:', notation);
             } catch (error: any) {
-                console.error('Failed to roll dice:', error);
+                console.error('❌ Failed to roll dice:', error);
             }
         },
 
-        // ✅ НОВЫЙ МЕТОД: Добавление сообщения
+        // ✅ СОХРАНЕННЫЙ МЕТОД: Добавление сообщения
         addMessage: (message: GameMessage) => {
             console.log('📝 Adding message to store:', message);
             set(state => ({
-                messages: [...state.messages, message].slice(-50)
+                messages: [...state.messages, message].slice(-50) // Последние 50 сообщений
             }));
         },
 
-        // ✅ НОВЫЙ addChatMessage - только для чата
+        // ✅ СОХРАНЕННЫЙ МЕТОД: Добавление чат сообщения
         addChatMessage: (message: GameMessage) => {
             console.log('💬 Adding chat message to store:', message);
             set((state) => ({
-                chatMessages: [...state.chatMessages, message].slice(-100)
+                chatMessages: [...state.chatMessages, message].slice(-100) // Последние 100 сообщений
             }));
         },
 
-        // ✅ НОВЫЕ МЕТОДЫ для инициативы и управления игрой
+        // ✅ СОХРАНЕННЫЙ МЕТОД: Бросок инициативы
         rollInitiative: async (characterId: string) => {
             const { currentGame } = get();
             if (!currentGame) return;
 
             try {
+                console.log('🎯 Rolling initiative for character:', characterId);
                 const result = await gameService.rollInitiative(currentGame.id, characterId);
+
                 // Обновляем локальное состояние
                 const { playersOnline } = get();
                 const updatedPlayers = playersOnline.map(p =>
@@ -532,67 +454,66 @@ export const useGameStore = create<GameState>()(
                 set({
                     playersOnline: updatedPlayers,
                     players: updatedPlayers,
-                    activePlayers: updatedPlayers.filter(p => p.is_online),
-                    initiativeOrder: result.initiative_order || get().initiativeOrder,
+                    activePlayers: updatedPlayers
                 });
+
+                console.log('✅ Initiative rolled successfully:', result);
             } catch (error: any) {
-                console.error('Failed to roll initiative:', error);
+                console.error('❌ Failed to roll initiative:', error);
             }
         },
 
+        // ✅ СОХРАНЕННЫЙ МЕТОД: Следующий ход
         nextTurn: async () => {
             const { currentGame } = get();
             if (!currentGame) return;
 
             try {
-                const result = await gameService.nextTurn(currentGame.id);
-                set({
-                    currentTurn: result.current_turn,
-                    turnNumber: result.turn_number,
-                    initiativeOrder: result.initiative_order || get().initiativeOrder,
-                });
+                console.log('➡️ Moving to next turn');
+                await gameService.nextTurn(currentGame.id);
+                console.log('✅ Turn advanced successfully');
             } catch (error: any) {
-                console.error('Failed to advance turn:', error);
+                console.error('❌ Failed to advance turn:', error);
             }
         },
 
-        // UI Actions
-        setChatInput: (input: string) => {
-            set({ chatInput: input });
-        },
+        // ✅ СОХРАНЕННЫЕ UI МЕТОДЫ
+        setChatInput: (input: string) => set({ chatInput: input }),
 
-        setTyping: (typing: boolean) => {
-            set({ isTyping: typing });
-        },
+        setTyping: (typing: boolean) => set({ isTyping: typing }),
 
-        toggleCharacterSheets: () => {
-            set(state => ({ showCharacterSheets: !state.showCharacterSheets }));
-        },
+        toggleCharacterSheets: () => set((state) => ({
+            showCharacterSheets: !state.showCharacterSheets
+        })),
 
-        toggleDiceRoller: () => {
-            set(state => ({ showDiceRoller: !state.showDiceRoller }));
-        },
+        toggleDiceRoller: () => set((state) => ({
+            showDiceRoller: !state.showDiceRoller
+        })),
 
         selectCharacter: (characterId: string | null) => {
+            console.log('👤 Selected character:', characterId);
             set({ selectedCharacterId: characterId });
         },
 
         updateCharacter: (characterId: string, updates: Partial<Character>) => {
-            set(state => ({
+            console.log('🔄 Updating character:', characterId, updates);
+            set((state) => ({
                 activeCharacters: state.activeCharacters.map(char =>
                     char.id === characterId ? { ...char, ...updates } : char
                 ),
             }));
         },
 
-        // Clear game state
+        // ✅ СОХРАНЕННЫЙ МЕТОД: Очистка состояния игры
         clearGameState: () => {
+            console.log('🧹 Clearing all game state');
             set({
                 currentGame: null,
                 isConnected: false,
                 isConnecting: false,
                 connectionError: null,
                 messages: [],
+                chatMessages: [],
                 playersOnline: [],
                 activeCharacters: [],
                 currentScene: null,
@@ -612,7 +533,7 @@ export const useGameStore = create<GameState>()(
     }))
 );
 
-// Selector hooks
+// ✅ СОХРАНЕННЫЕ СЕЛЕКТОРЫ
 export const useGameConnection = () => {
     const store = useGameStore();
     return {
@@ -627,25 +548,11 @@ export const useGameChat = () => {
     const store = useGameStore();
     return {
         messages: store.messages,
-        chatMessages: store.chatMessages, // ✅ Добавляем chatMessages
-        chatInput: store.chatInput,
-        isTyping: store.isTyping,
-        isConnected: store.isConnected, // ✅ Добавляем состояние подключения
-        sendMessage: store.sendMessage,
-        sendAction: store.sendAction,
-        setChatInput: store.setChatInput,
-        setTyping: store.setTyping,
-    };
-};
-
-// ✅ НОВЫЙ: Специальный селектор только для чата
-export const useChatMessages = () => {
-    const store = useGameStore();
-    return {
         chatMessages: store.chatMessages,
         chatInput: store.chatInput,
-        isConnected: store.isConnected,
+        isTyping: store.isTyping,
         sendMessage: store.sendMessage,
+        sendAction: store.sendAction,
         setChatInput: store.setChatInput,
         setTyping: store.setTyping,
     };
@@ -695,12 +602,12 @@ export const useGameData = () => {
         isConnecting: store.isConnecting,
         connectionError: store.connectionError,
         messages: store.messages,
-        chatMessages: store.chatMessages, // ✅ Добавляем chatMessages
+        chatMessages: store.chatMessages,
         playersOnline: store.playersOnline,
         activeCharacters: store.activeCharacters,
         currentScene: store.currentScene,
         selectedCharacterId: store.selectedCharacterId,
-        // ✅ НОВЫЕ ПОЛЯ для GamePage
+        // ✅ ПОЛЯ для GamePage
         players: store.players,
         activePlayers: store.activePlayers,
         currentTurn: store.currentTurn,

@@ -1,3 +1,5 @@
+// new-working-frontend/src/services/api.ts - ПОЛНАЯ ОБНОВЛЕННАЯ ВЕРСИЯ
+
 import axios, { AxiosInstance, AxiosResponse, AxiosError } from 'axios';
 import { getFromStorage, setToStorage, removeFromStorage } from '@/utils';
 import type { AuthTokens, ApiResponse } from '@/types';
@@ -65,63 +67,96 @@ class ApiService {
                 // ✅ Обработка таймаута
                 if (error.code === 'ECONNABORTED' || error.message.includes('timeout')) {
                     console.error('⏰ Request timeout:', originalRequest?.url);
-                    return Promise.reject(new Error(`Запрос превысил время ожидания (${this.api.defaults.timeout}ms). Проверьте подключение к серверу.`));
+                    return Promise.reject(new Error(`Запрос превысил время ожидания (${this.api.defaults.timeout}ms). Попробуйте позже.`));
                 }
 
-                // ✅ Обработка сетевых ошибок
-                if (error.code === 'ERR_NETWORK' || !error.response) {
-                    console.error('🌐 Network error:', error.message);
-                    return Promise.reject(new Error('Ошибка сети. Проверьте подключение к интернету и доступность сервера.'));
-                }
-
+                // Handle 401 Unauthorized
                 if (error.response?.status === 401 && !originalRequest._retry) {
                     originalRequest._retry = true;
 
-                    try {
-                        const tokens = this.getTokens();
-                        if (tokens?.refresh_token) {
+                    const tokens = this.getTokens();
+                    if (tokens?.refresh_token) {
+                        try {
                             const newTokens = await this.refreshToken(tokens.refresh_token);
                             this.setTokens(newTokens);
-
-                            // Retry original request with new token
                             originalRequest.headers.Authorization = `Bearer ${newTokens.access_token}`;
                             return this.api(originalRequest);
+                        } catch (refreshError) {
+                            console.error('Token refresh failed:', refreshError);
+                            this.clearTokens();
+
+                            // ✅ Перенаправляем на логин только если не находимся уже там
+                            if (window.location.pathname !== '/login' && window.location.pathname !== '/register') {
+                                window.location.href = '/login';
+                            }
                         }
-                    } catch (refreshError) {
-                        // Refresh failed, logout user
+                    } else {
                         this.clearTokens();
-                        window.location.href = '/login';
-                        return Promise.reject(refreshError);
+                        if (window.location.pathname !== '/login' && window.location.pathname !== '/register') {
+                            window.location.href = '/login';
+                        }
                     }
                 }
 
-                // ✅ Обработка 404 ошибок для игр
-                if (error.response?.status === 404 && originalRequest?.url?.includes('/games/')) {
-                    return Promise.reject(new Error('Игра не найдена или была удалена'));
-                }
-
-                // ✅ Обработка 403 ошибок
-                if (error.response?.status === 403) {
-                    return Promise.reject(new Error('Недостаточно прав для выполнения этого действия'));
-                }
-
-                // ✅ Обработка 500 ошибок
-                if (error.response?.status >= 500) {
-                    return Promise.reject(new Error('Ошибка сервера. Попробуйте позже'));
-                }
-
-                return Promise.reject(error);
+                // ✅ Улучшенная обработка других ошибок
+                return Promise.reject(this.formatError(error));
             }
         );
     }
 
-    // Token management
-    private getTokens(): AuthTokens | null {
-        return getFromStorage<AuthTokens | null>('auth_tokens', null);
+    // ✅ Новый метод для форматирования ошибок
+    private formatError(error: AxiosError): Error {
+        const response = error.response;
+
+        if (response?.data) {
+            const data = response.data as any;
+
+            // Обработка разных форматов ошибок с сервера
+            if (data.detail) {
+                return new Error(data.detail);
+            }
+            if (data.message) {
+                return new Error(data.message);
+            }
+            if (data.error) {
+                return new Error(data.error);
+            }
+        }
+
+        // Стандартные HTTP коды ошибок
+        switch (response?.status) {
+            case 400:
+                return new Error('Некорректный запрос');
+            case 401:
+                return new Error('Необходима авторизация');
+            case 403:
+                return new Error('Доступ запрещен');
+            case 404:
+                return new Error('Ресурс не найден');
+            case 422:
+                return new Error('Ошибка валидации данных');
+            case 429:
+                return new Error('Слишком много запросов. Попробуйте позже');
+            case 500:
+                return new Error('Ошибка сервера. Попробуйте позже');
+            case 502:
+                return new Error('Сервер временно недоступен');
+            case 503:
+                return new Error('Сервис временно недоступен');
+            case 504:
+                return new Error('Превышено время ожидания ответа от сервера');
+            default:
+                return new Error(error.message || 'Произошла неизвестная ошибка');
+        }
     }
 
+    // Token management
     private setTokens(tokens: AuthTokens): void {
         setToStorage('auth_tokens', tokens);
+    }
+
+    private getTokens(): AuthTokens | null {
+        return getFromStorage('auth_tokens');
     }
 
     private clearTokens(): void {
@@ -129,7 +164,10 @@ class ApiService {
     }
 
     // Auth methods
-    async login(credentials: { username: string; password: string }): Promise<AuthTokens> {
+    async login(credentials: {
+        username: string;
+        password: string;
+    }): Promise<AuthTokens> {
         const response = await this.api.post<AuthTokens>('/auth/login', credentials);
         this.setTokens(response.data);
         return response.data;
@@ -191,26 +229,56 @@ class ApiService {
 
     // Generic API methods
     async get<T>(url: string, params?: any): Promise<T> {
+        // ✅ ИСПРАВЛЕНИЕ: Проверяем что url это строка
+        if (typeof url !== 'string') {
+            console.error('❌ Invalid URL passed to get method:', url);
+            throw new Error('Invalid URL provided');
+        }
+
         const response = await this.api.get<T>(url, { params });
         return response.data;
     }
 
     async post<T>(url: string, data?: any): Promise<T> {
+        // ✅ ИСПРАВЛЕНИЕ: Проверяем что url это строка
+        if (typeof url !== 'string') {
+            console.error('❌ Invalid URL passed to post method:', url);
+            throw new Error('Invalid URL provided');
+        }
+
         const response = await this.api.post<T>(url, data);
         return response.data;
     }
 
     async put<T>(url: string, data?: any): Promise<T> {
+        // ✅ ИСПРАВЛЕНИЕ: Проверяем что url это строка
+        if (typeof url !== 'string') {
+            console.error('❌ Invalid URL passed to put method:', url);
+            throw new Error('Invalid URL provided');
+        }
+
         const response = await this.api.put<T>(url, data);
         return response.data;
     }
 
     async patch<T>(url: string, data?: any): Promise<T> {
+        // ✅ ИСПРАВЛЕНИЕ: Проверяем что url это строка
+        if (typeof url !== 'string') {
+            console.error('❌ Invalid URL passed to patch method:', url);
+            throw new Error('Invalid URL provided');
+        }
+
         const response = await this.api.patch<T>(url, data);
         return response.data;
     }
 
     async delete<T>(url: string): Promise<T> {
+        // ✅ ИСПРАВЛЕНИЕ: Проверяем что url это строка
+        if (typeof url !== 'string') {
+            console.error('❌ Invalid URL passed to delete method:', url);
+            throw new Error('Invalid URL provided');
+        }
+
         const response = await this.api.delete<T>(url);
         return response.data;
     }
@@ -300,6 +368,76 @@ class ApiService {
         }
 
         throw lastError!;
+    }
+
+    // ✅ Утилиты для отладки
+    getBaseUrl(): string {
+        return this.api.defaults.baseURL || '';
+    }
+
+    getCurrentTimeout(): number {
+        return this.api.defaults.timeout || 0;
+    }
+
+    // ✅ Методы для работы с WebSocket URL
+    getWebSocketUrl(): string {
+        return API_BASE_URL.replace('http', 'ws');
+    }
+
+    // ✅ Метод для формирования полных URL
+    getFullUrl(path: string): string {
+        const cleanPath = path.startsWith('/') ? path : `/${path}`;
+        return `${API_BASE_URL}/api${cleanPath}`;
+    }
+
+    // ✅ Метод для загрузки файлов
+    async downloadFile(url: string, filename?: string): Promise<void> {
+        try {
+            const response = await this.api.get(url, {
+                responseType: 'blob'
+            });
+
+            const blob = new Blob([response.data]);
+            const downloadUrl = window.URL.createObjectURL(blob);
+            const link = document.createElement('a');
+
+            link.href = downloadUrl;
+            link.download = filename || 'download';
+            document.body.appendChild(link);
+            link.click();
+
+            document.body.removeChild(link);
+            window.URL.revokeObjectURL(downloadUrl);
+        } catch (error) {
+            console.error('File download failed:', error);
+            throw error;
+        }
+    }
+
+    // ✅ Утилиты для работы с токенами авторизации
+    setAuthToken(token: string): void {
+        this.setTokens({ access_token: token, refresh_token: '', token_type: 'bearer' });
+        this.api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+    }
+
+    removeAuthToken(): void {
+        this.clearTokens();
+        delete this.api.defaults.headers.common['Authorization'];
+    }
+
+    getAuthToken(): string | null {
+        const tokens = this.getTokens();
+        return tokens?.access_token || null;
+    }
+
+    // ✅ Метод для изменения базового URL (полезно для разработки)
+    setBaseUrl(baseUrl: string): void {
+        this.api.defaults.baseURL = `${baseUrl}/api`;
+    }
+
+    // ✅ Метод для изменения таймаута
+    setTimeout(timeout: number): void {
+        this.api.defaults.timeout = timeout;
     }
 }
 

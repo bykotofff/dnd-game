@@ -83,13 +83,14 @@ class WebSocketService {
 
     // Правильное получение WebSocket URL
     private getWebSocketUrl(gameId: string, token: string): string {
-        // Проверяем полный WS URL (VITE_WS_URL)
+        // ✅ ИСПРАВЛЕНИЕ: Правильный URL для WebSocket в соответствии с backend
+
+        // Проверяем переменные окружения
         const wsUrl = import.meta.env.VITE_WS_URL;
         if (wsUrl) {
             return `${wsUrl}/ws/game/${gameId}?token=${encodeURIComponent(token)}`;
         }
 
-        // Проверяем VITE_WS_HOST (только host:port)
         const wsHost = import.meta.env.VITE_WS_HOST;
         if (wsHost) {
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -102,26 +103,71 @@ class WebSocketService {
             try {
                 const url = new URL(apiUrl);
                 const protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+                // ✅ ИСПРАВЛЕНИЕ: Используем правильный путь /ws вместо /api/ws
                 return `${protocol}//${url.host}/ws/game/${gameId}?token=${encodeURIComponent(token)}`;
             } catch (error) {
                 console.warn('Failed to parse VITE_API_URL:', apiUrl);
             }
         }
 
-        // Резервный вариант - предполагаем что backend на том же хосте, но порт 8000
+        // ✅ ИСПРАВЛЕНИЕ: Резервный вариант с правильным портом и путем
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const currentHost = window.location.hostname;
+
+        // Для разработки используем известный IP и порт
+        if (currentHost === 'localhost' || currentHost === '127.0.0.1') {
+            return `${protocol}//192.168.4.55:8000/ws/game/${gameId}?token=${encodeURIComponent(token)}`;
+        }
+
         return `${protocol}//${currentHost}:8000/ws/game/${gameId}?token=${encodeURIComponent(token)}`;
     }
 
-    // Получить текущее состояние подключения
-    getConnectionState(): ConnectionState {
-        return this.connectionState;
-    }
+    async testConnection(gameId: string): Promise<boolean> {
+        try {
+            const token = this.getAuthToken();
+            if (!token) {
+                console.error('❌ No auth token for WebSocket test');
+                return false;
+            }
 
-    // Получить ID текущей игры
-    getCurrentGameId(): string | null {
-        return this.gameId;
+            const wsUrl = this.getWebSocketUrl(gameId, token);
+            console.log('🧪 Testing WebSocket connection to:', wsUrl);
+
+            return new Promise((resolve) => {
+                const testSocket = new WebSocket(wsUrl);
+
+                const timeout = setTimeout(() => {
+                    console.error('⏰ WebSocket test timeout');
+                    testSocket.close();
+                    resolve(false);
+                }, 10000);
+
+                testSocket.onopen = () => {
+                    console.log('✅ WebSocket test successful');
+                    clearTimeout(timeout);
+                    testSocket.close();
+                    resolve(true);
+                };
+
+                testSocket.onerror = (error) => {
+                    console.error('❌ WebSocket test failed:', error);
+                    clearTimeout(timeout);
+                    resolve(false);
+                };
+
+                testSocket.onclose = (event) => {
+                    console.log('🔒 WebSocket test closed:', event.code, event.reason);
+                    clearTimeout(timeout);
+                    if (event.code === 1000) {
+                        resolve(true); // Нормальное закрытие после успешного теста
+                    }
+                };
+            });
+
+        } catch (error) {
+            console.error('💥 WebSocket test error:', error);
+            return false;
+        }
     }
 
     // Подключение к игре
@@ -139,6 +185,16 @@ class WebSocketService {
         this.gameId = gameId;
         this.setConnectionState(ConnectionState.CONNECTING);
 
+        // ✅ ДОБАВЛЕНО: Предварительный тест подключения
+        console.log('🧪 Testing WebSocket connection first...');
+        const testResult = await this.testConnection(gameId);
+
+        if (!testResult) {
+            console.error('❌ WebSocket test failed, connection will likely fail');
+            this.setConnectionState(ConnectionState.ERROR);
+            throw new Error('WebSocket connection test failed. Check server availability.');
+        }
+
         return new Promise((resolve, reject) => {
             try {
                 const token = this.getAuthToken();
@@ -147,18 +203,19 @@ class WebSocketService {
                 }
 
                 const wsUrl = this.getWebSocketUrl(gameId, token);
-                console.log('Connecting to WebSocket:', wsUrl);
+                console.log('🔌 Connecting to WebSocket:', wsUrl);
 
                 this.socket = new WebSocket(wsUrl);
                 this.setupEventListeners(resolve, reject);
 
             } catch (error) {
-                console.error('Error creating WebSocket connection:', error);
+                console.error('💥 Error creating WebSocket connection:', error);
                 this.setConnectionState(ConnectionState.ERROR);
                 reject(error);
             }
         });
     }
+
 
     // Настройка обработчиков событий WebSocket
     private setupEventListeners(resolve: () => void, reject: (error: Error) => void): void {
@@ -332,6 +389,23 @@ class WebSocketService {
     }
 
     // ========== ИГРОВЫЕ МЕТОДЫ ==========
+
+    debugWebSocketConnection(gameId: string): void {
+        const token = this.getAuthToken();
+        const wsUrl = this.getWebSocketUrl(gameId, token);
+
+        console.log('🔍 WebSocket Debug Info:');
+        console.log('  Game ID:', gameId);
+        console.log('  Token exists:', !!token);
+        console.log('  Token length:', token?.length || 0);
+        console.log('  WebSocket URL:', wsUrl);
+        console.log('  Current host:', window.location.hostname);
+        console.log('  Protocol:', window.location.protocol);
+        console.log('  Environment variables:');
+        console.log('    VITE_WS_URL:', import.meta.env.VITE_WS_URL);
+        console.log('    VITE_WS_HOST:', import.meta.env.VITE_WS_HOST);
+        console.log('    VITE_API_URL:', import.meta.env.VITE_API_URL);
+    }
 
     // Отправка сообщения в чат
     sendChatMessage(content: string, isOOC: boolean = false, characterId?: string): boolean {
