@@ -1,10 +1,11 @@
-from fastapi import FastAPI, Depends, HTTPException, status
+# backend/app/main.py - ИСПРАВЛЕННАЯ ВЕРСИЯ
+
+import logging
+from contextlib import asynccontextmanager
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
-from contextlib import asynccontextmanager
-import logging
-import uvicorn
 
 from app.config import settings
 from app.core.database import init_db, close_db
@@ -13,14 +14,16 @@ from app.services.ai_service import ai_service
 from app.services.image_service import image_service
 
 # Импорт роутеров
-from app.api import auth, users, characters, games, campaigns, websocket
-from app.api import images  # Добавляем роутер изображений
-
-# Настройка логирования
-logging.basicConfig(
-    level=getattr(logging, settings.LOG_LEVEL),
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+from app.api import (
+    auth,
+    users,
+    characters,
+    campaigns,
+    games,
+    images,
+    websocket
 )
+
 logger = logging.getLogger(__name__)
 
 
@@ -39,17 +42,18 @@ async def lifespan(app: FastAPI):
         await redis_client.connect()
         logger.info("Redis connected")
 
-        # Проверка сервисов
+        # Проверка AI сервиса
         ai_health = await ai_service.health_check()
         logger.info(f"AI Service (Ollama) health: {'OK' if ai_health else 'FAILED'}")
 
+        # Проверка Image сервиса
         image_health = await image_service.health_check()
         logger.info(f"Image Service (SD) health: {'OK' if image_health else 'FAILED'}")
 
         logger.info("Server startup completed successfully")
 
     except Exception as e:
-        logger.error(f"Startup failed: {e}")
+        logger.error(f"Startup error: {e}")
         raise
 
     yield
@@ -90,7 +94,7 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 # Статические файлы
 app.mount("/static", StaticFiles(directory=settings.UPLOAD_DIR), name="static")
 
-# ✅ ИСПРАВЛЕНИЕ: WebSocket роутер БЕЗ префикса /api
+# ✅ ИСПРАВЛЕНИЕ: WebSocket роутер с правильным префиксом /ws
 app.include_router(websocket.router, prefix="/ws", tags=["WebSocket"])
 
 # Роутеры API
@@ -122,59 +126,23 @@ async def health_check():
         # Проверка AI сервиса
         ai_health = await ai_service.health_check()
 
-        # Проверка сервиса изображений
+        # Проверка Image сервиса
         image_health = await image_service.health_check()
 
         return {
             "status": "healthy",
+            "version": settings.VERSION,
             "services": {
                 "redis": "ok" if redis_health else "error",
                 "ai": "ok" if ai_health else "error",
-                "images": "ok" if image_health else "error"
+                "image": "ok" if image_health else "error"
             },
-            "timestamp": "2024-01-01T00:00:00Z"  # В реальном приложении используйте datetime.utcnow()
+            "environment": settings.ENVIRONMENT
         }
 
     except Exception as e:
-        logger.error(f"Health check failed: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Service health check failed"
-        )
-
-
-@app.get("/api/info")
-async def get_api_info():
-    """Информация об API"""
-    return {
-        "name": settings.APP_NAME,
-        "version": settings.VERSION,
-        "features": [
-            "AI Dungeon Master (Ollama)",
-            "Character Management",
-            "Campaign System",
-            "Real-time Gaming (WebSocket)",
-            "Image Generation (Stable Diffusion)",
-            "Dice Rolling System",
-            "Save/Load Game States"
-        ],
-        "endpoints": {
-            "auth": "/api/auth/",
-            "users": "/api/users/",
-            "characters": "/api/characters/",
-            "campaigns": "/api/campaigns/",
-            "games": "/api/games/",
-            "images": "/api/images/",
-            "websocket": "/ws/"
+        logger.error(f"Health check error: {e}")
+        return {
+            "status": "unhealthy",
+            "error": str(e)
         }
-    }
-
-
-if __name__ == "__main__":
-    uvicorn.run(
-        "app.main:app",
-        host=settings.HOST,
-        port=settings.PORT,
-        reload=settings.DEBUG,
-        log_level=settings.LOG_LEVEL.lower()
-    )

@@ -58,7 +58,7 @@ import {
 import { useGameStore } from '../../store/gameStore';
 import { useAuth } from '../../store/authStore';
 import { gameService } from '../../services/gameService';
-import { websocketService } from '../../services/websocketService';
+import websocketService  from '../../services/websocketService';
 
 // ✅ НОВЫЕ ИМПОРТЫ для поддержки персонажей
 import { PlayersList } from '../../components/game/PlayersList';
