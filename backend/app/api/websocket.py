@@ -129,9 +129,52 @@ async def get_player_character_info(game: Game, user_id: str, db: AsyncSession) 
         return None
 
 
+async def get_all_players_info(game: Game, db: AsyncSession) -> Dict[str, Dict]:
+    """Получить информацию о всех игроках в игре"""
+    try:
+        players_info = {}
+
+        if not game.players:
+            return players_info
+
+        for user_id in game.players:
+            try:
+                # Получаем информацию о пользователе
+                user_query = select(User).where(User.id == user_id)
+                user_result = await db.execute(user_query)
+                user = user_result.scalar_one_or_none()
+
+                if not user:
+                    continue
+
+                # Получаем информацию о персонаже
+                character_info = await get_player_character_info(game, user_id, db)
+
+                players_info[user_id] = {
+                    "user_id": user_id,
+                    "username": user.username,
+                    "character_name": character_info.get("name") if character_info else user.username,
+                    "character_info": character_info,
+                    "is_online": user_id in manager.get_connected_users(str(game.id))
+                }
+
+            except Exception as e:
+                logger.error(f"Error getting info for player {user_id}: {e}")
+                continue
+
+        return players_info
+
+    except Exception as e:
+        logger.error(f"Error getting all players info: {e}")
+        return {}
+
+
 async def get_game_state_for_player(game: Game, user: User, character_info: Optional[Dict], db: AsyncSession) -> Dict:
     """Получить состояние игры для игрока"""
     try:
+        # Получаем информацию о всех игроках
+        all_players_info = await get_all_players_info(game, db)
+
         return {
             "game_id": str(game.id),
             "game_name": game.name,
@@ -139,12 +182,42 @@ async def get_game_state_for_player(game: Game, user: User, character_info: Opti
             "current_scene": game.current_scene,
             "turn_info": game.turn_info or {},
             "connected_players": manager.get_connected_users(str(game.id)),
+            "players": all_players_info,  # Полная информация о всех игроках
             "your_character": character_info,
             "game_settings": game.settings or {}
         }
     except Exception as e:
         logger.error(f"Error getting game state: {e}")
         return {"error": "Failed to get game state"}
+
+
+async def handle_get_game_state(websocket: WebSocket, game_id: str, user_id: str, user: User, db: AsyncSession):
+    """Обработка запроса состояния игры"""
+    try:
+        # Получаем игру
+        query = select(Game).where(Game.id == game_id)
+        result = await db.execute(query)
+        game = result.scalar_one_or_none()
+
+        if not game:
+            await websocket.send_text(json.dumps({
+                "type": "error",
+                "data": {"message": "Game not found"}
+            }))
+            return
+
+        # Получаем информацию о персонаже текущего пользователя
+        character_info = await get_player_character_info(game, user_id, db)
+
+        # Отправляем обновленное состояние игры
+        game_state = await get_game_state_for_player(game, user, character_info, db)
+        state_message = WebSocketMessage("game_state", game_state)
+        await websocket.send_text(state_message.to_json())
+
+        logger.info(f"Sent game state to user {user.username} in game {game_id}")
+
+    except Exception as e:
+        logger.error(f"Error handling get_game_state: {e}")
 
 
 async def handle_chat_message(websocket: WebSocket, game_id: str, user_id: str, user: User, character_name: str, message_data: Dict, db: AsyncSession):
@@ -297,6 +370,22 @@ async def websocket_game_endpoint(
         state_message = WebSocketMessage("game_state", game_state)
         await websocket.send_text(state_message.to_json())
 
+        # Отправляем обновленное состояние игры всем игрокам (после присоединения нового)
+        try:
+            all_players_info = await get_all_players_info(game, db)
+            updated_state = {
+                "game_id": str(game.id),
+                "players": all_players_info,
+                "connected_players": manager.get_connected_users(str(game.id))
+            }
+
+            # Отправляем всем игрокам обновленную информацию об игроках
+            players_update_message = WebSocketMessage("players_update", updated_state)
+            await manager.broadcast_to_game(players_update_message.to_json(), game_id)
+
+        except Exception as e:
+            logger.error(f"Error sending players update: {e}")
+
         # Основной цикл обработки сообщений
         while True:
             try:
@@ -312,6 +401,10 @@ async def websocket_game_endpoint(
                     await handle_player_action(websocket, game_id, user_id_str, user, character_name, character_info, message_data, db)
                 elif message_type == "dice_roll":
                     await handle_dice_roll(websocket, game_id, user_id_str, user, character_name, message_data, db)
+                elif message_type == "get_game_state":
+                    await handle_get_game_state(websocket, game_id, user_id_str, user, db)
+                elif message_type == "get_players_info":  # Альтернативный запрос
+                    await handle_get_game_state(websocket, game_id, user_id_str, user, db)
                 elif message_type == "ping":
                     await websocket.send_text(json.dumps({"type": "pong"}))
                 else:

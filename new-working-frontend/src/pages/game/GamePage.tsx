@@ -58,7 +58,7 @@ import {
 import { useGameStore } from '../../store/gameStore';
 import { useAuth } from '../../store/authStore';
 import { gameService } from '../../services/gameService';
-import websocketService  from '../../services/websocketService';
+import websocketService from '../../services/websocketService';
 
 // ✅ НОВЫЕ ИМПОРТЫ для поддержки персонажей
 import { PlayersList } from '../../components/game/PlayersList';
@@ -132,10 +132,14 @@ const PlayerCard = ({ player, isCurrentUser = false, isOnline = true, className 
     const statusColor = isOnline ? "bg-green-500" : "bg-gray-400";
     const borderColor = isCurrentUser ? "border-blue-500" : "border-gray-600";
 
-    // ✅ Поддержка как старого, так и нового формата данных
+    // ✅ ИСПРАВЛЕНО: Правильно извлекаем данные
     const characterName = player.character_name || player.name;
     const username = player.username || player.user_name;
     const characterInfo = player.character_info;
+
+    // ✅ НОВОЕ: Показываем сокращенный ID если нет имени
+    const displayName = characterName || username || `Игрок ${player.user_id?.slice(0, 8) || 'Unknown'}`;
+    const displayUsername = username && username !== characterName ? username : null;
 
     return (
         <div className={`
@@ -147,27 +151,26 @@ const PlayerCard = ({ player, isCurrentUser = false, isOnline = true, className 
             <div className="flex items-center space-x-3">
                 <div className="relative">
                     <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white font-bold">
-                        {characterName?.[0] || username?.[0] || 'U'}
+                        {displayName[0]?.toUpperCase() || 'U'}
                     </div>
                     <div className={`absolute -bottom-1 -right-1 w-3 h-3 rounded-full border-2 border-white dark:border-gray-800 ${statusColor}`}></div>
                 </div>
                 <div className="flex-1 min-w-0">
                     <div className="flex items-center space-x-2">
                         <p className="font-medium text-gray-900 dark:text-white truncate">
-                            {/* ✅ ПРИОРИТЕТ: Показываем имя персонажа если есть */}
-                            {characterName || username || 'Безымянный персонаж'}
+                            {displayName}
                         </p>
                         {isCurrentUser && (
                             <span className="px-2 py-1 text-xs bg-blue-500 text-white rounded-full">Вы</span>
                         )}
                     </div>
-                    {/* ✅ Показываем username если есть персонаж */}
-                    {characterName && username && (
+                    {/* Показываем username если отличается от имени персонажа */}
+                    {displayUsername && (
                         <p className="text-sm text-gray-600 dark:text-gray-400 truncate">
-                            @{username}
+                            @{displayUsername}
                         </p>
                     )}
-                    {/* ✅ Информация о персонаже */}
+                    {/* Информация о персонаже */}
                     {characterInfo && (
                         <div className="mt-1 space-y-1">
                             <p className="text-xs text-gray-500 dark:text-gray-400">
@@ -189,15 +192,6 @@ const PlayerCard = ({ player, isCurrentUser = false, isOnline = true, className 
                                     )}
                                 </div>
                             )}
-                        </div>
-                    )}
-                    {/* ✅ Fallback для старого формата */}
-                    {!characterInfo && (player.current_hp !== undefined && player.max_hp !== undefined) && (
-                        <div className="flex items-center space-x-2 mt-1">
-                            <HeartSolid className="w-4 h-4 text-red-500" />
-                            <span className="text-sm text-gray-600 dark:text-gray-400">
-                                {player.current_hp}/{player.max_hp}
-                            </span>
                         </div>
                     )}
                 </div>
@@ -350,27 +344,23 @@ const GamePage = () => {
     const navigate = useNavigate();
     const { user } = useAuth();
 
-    // Получаем состояние из gameStore
+    // ✅ ИСПРАВЛЕНО: Получаем только существующие поля из gameStore
     const {
         currentGame,
         isConnected,
         isConnecting,
         connectionError,
         messages,
-        chatMessages,
-        currentScene,
         players,
-        playersOnline,
         connectToGame,
         disconnectFromGame,
         sendAction,
         sendMessage,
-        loadGame,
         rollDice,
-        clearGame
+        addMessage
     } = useGameStore();
 
-    // ✅ НОВЫЕ СОСТОЯНИЯ для поддержки персонажей
+    // ✅ СОСТОЯНИЯ для поддержки персонажей
     const [gameState, setGameState] = useState<WebSocketGameState | null>(null);
     const [playersWithCharacters, setPlayersWithCharacters] = useState<Record<string, PlayerInfo>>({});
     const [currentUserCharacter, setCurrentUserCharacter] = useState(null);
@@ -386,91 +376,196 @@ const GamePage = () => {
     const [isLoadingGame, setIsLoadingGame] = useState(false);
     const [loadError, setLoadError] = useState(null);
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-    const [activeTab, setActiveTab] = useState('scene'); // scene, chat, players
+    const [activeTab, setActiveTab] = useState('scene');
     const [generatedScene, setGeneratedScene] = useState(null);
 
     // Refs для автоскролла
     const messagesEndRef = useRef(null);
     const chatEndRef = useRef(null);
 
-    // Локальные состояния для fallback
+    // ✅ ЛОКАЛЬНЫЕ СОСТОЯНИЯ для fallback
     const [localMessages, setLocalMessages] = useState([]);
     const [localPlayers, setLocalPlayers] = useState([]);
+    const [localChatMessages, setLocalChatMessages] = useState([]);
     const [connectionAttempts, setConnectionAttempts] = useState(0);
     const [maxConnectionAttempts] = useState(3);
     const [hasTriedConnecting, setHasTriedConnecting] = useState(false);
 
-    // Используем локальные состояния как fallback
+    // ✅ ИСПРАВЛЕНО: Используем правильные fallback значения
     const actualMessages = messages?.length > 0 ? messages : localMessages;
-    const actualPlayers = Object.keys(playersWithCharacters).length > 0 ? Object.values(playersWithCharacters) : (players?.length > 0 ? players : localPlayers);
-    const actualCurrentScene = currentScene || generatedScene;
+    const actualPlayers = players?.length > 0 ? players : localPlayers;
+    const actualCurrentScene = currentGame?.current_scene || generatedScene;
+    const actualChatMessages = localChatMessages;
 
-    // ✅ НОВАЯ ФУНКЦИЯ: Обработка WebSocket сообщений с поддержкой персонажей
+    // ✅ ИСПРАВЛЕНО: Обработка WebSocket сообщений
     const handleWebSocketMessage = useCallback((data: any) => {
         try {
             const message = typeof data === 'string' ? JSON.parse(data) : data;
+            console.log('Processing WebSocket message:', message);
 
             switch (message.type) {
                 case 'game_state':
-                    // ✅ Обновляем состояние игры с информацией о персонажах
                     if (message.data) {
+                        console.log('Game state received:', message.data);
                         setGameState(message.data);
+
+                        // ✅ ИСПРАВЛЕНО: Обрабатываем players (полная информация о всех игроках)
                         if (message.data.players) {
-                            setPlayersWithCharacters(message.data.players);
+                            console.log('Players data:', message.data.players);
+
+                            const playersArray = Object.entries(message.data.players).map(([userId, playerData]: [string, any]) => ({
+                                user_id: userId,
+                                id: userId,
+                                username: playerData.username || 'Unknown',
+                                character_name: playerData.character_name || playerData.username,
+                                character_info: playerData.character_info,
+                                is_online: playerData.is_online,
+                                // Для совместимости со старым форматом
+                                current_hp: playerData.character_info?.current_hp,
+                                max_hp: playerData.character_info?.max_hp
+                            }));
+
+                            setLocalPlayers(playersArray);
+                            console.log('Players array set:', playersArray);
                         }
+
+                        // ✅ Обрабатываем информацию о вашем персонаже
                         if (message.data.your_character) {
+                            console.log('Your character:', message.data.your_character);
                             setCurrentUserCharacter(message.data.your_character);
+                        }
+
+                        // ✅ Обрабатываем текущую сцену
+                        if (message.data.current_scene) {
+                            setGeneratedScene({
+                                location: message.data.current_scene,
+                                description: "Текущая игровая локация",
+                                generated: true
+                            });
                         }
                     }
                     break;
 
-                case 'chat_message':
-                case 'player_action':
-                case 'ai_response':
+                case 'players_update':
+                    // ✅ НОВОЕ: Обработка обновления списка игроков
+                    if (message.data && message.data.players) {
+                        console.log('Players update received:', message.data.players);
+
+                        const playersArray = Object.entries(message.data.players).map(([userId, playerData]: [string, any]) => ({
+                            user_id: userId,
+                            id: userId,
+                            username: playerData.username || 'Unknown',
+                            character_name: playerData.character_name || playerData.username,
+                            character_info: playerData.character_info,
+                            is_online: playerData.is_online,
+                            current_hp: playerData.character_info?.current_hp,
+                            max_hp: playerData.character_info?.max_hp
+                        }));
+
+                        setLocalPlayers(playersArray);
+                        console.log('Players updated:', playersArray);
+                    }
+                    break;
+
                 case 'system':
-                case 'dice_roll_request':
+                    // ✅ Обрабатываем системные сообщения
+                    if (message.data.message) {
+                        const systemMessage = {
+                            id: `system-${Date.now()}-${Math.random()}`,
+                            type: 'system',
+                            author: 'Система',
+                            content: message.data.message,
+                            timestamp: message.data.timestamp || new Date().toISOString()
+                        };
+                        setLocalMessages(prev => [...prev, systemMessage]);
+
+                        // Если это сообщение о присоединении/выходе, запрашиваем обновленное состояние
+                        if (message.data.message.includes('присоединился') || message.data.message.includes('покинул')) {
+                            setTimeout(() => {
+                                if (websocketService.isConnected()) {
+                                    websocketService.send({ type: 'get_game_state' });
+                                }
+                            }, 500);
+                        }
+                    }
+                    break;
+
+                case 'player_joined':
+                case 'player_left':
+                    // ✅ Запрашиваем обновленное состояние игры
+                    if (websocketService.isConnected()) {
+                        setTimeout(() => {
+                            websocketService.send({ type: 'get_game_state' });
+                        }, 500);
+                    }
+                    break;
+
+                case 'chat_message':
+                    const chatMessage = {
+                        id: `chat-${Date.now()}-${Math.random()}`,
+                        type: 'chat',
+                        author: message.data.character_name || message.data.player_name || message.data.username || 'Неизвестный',
+                        sender_name: message.data.character_name || message.data.player_name,
+                        content: message.data.content || message.data.message,
+                        timestamp: message.data.timestamp || new Date().toISOString()
+                    };
+                    setLocalChatMessages(prev => [...prev, chatMessage]);
+                    break;
+
+                case 'player_action':
+                    const actionMessage = {
+                        id: `action-${Date.now()}-${Math.random()}`,
+                        type: 'player_action',
+                        author: message.data.character_name || message.data.player_name || 'Неизвестный',
+                        sender_name: message.data.character_name,
+                        content: message.data.action || message.data.content,
+                        timestamp: message.data.timestamp || new Date().toISOString()
+                    };
+                    setLocalMessages(prev => [...prev, actionMessage]);
+                    break;
+
+                case 'ai_response':
+                case 'dice_roll':
                 case 'dice_check_result':
-                    // ✅ Обновляем сообщения с поддержкой имен персонажей
                     const gameMessage = {
-                        id: `${message.type}-${Date.now()}`,
+                        id: `${message.type}-${Date.now()}-${Math.random()}`,
                         type: message.type,
-                        author: message.data.sender_name || message.data.player_name || message.data.author || 'Неизвестный',
-                        sender_name: message.data.sender_name || message.data.player_name, // ✅ Новое поле
+                        author: message.data.character_name || message.data.sender_name || 'ИИ Мастер',
+                        sender_name: message.data.character_name || message.data.sender_name,
                         content: message.data.content || message.data.message || message.data.action,
                         timestamp: message.data.timestamp || new Date().toISOString(),
-                        // ✅ Дополнительные поля для бросков
                         total: message.data.total,
                         success: message.data.success,
-                        base_roll: message.data.base_roll,
-                        modifier: message.data.modifier,
-                        dc: message.data.dc
+                        notation: message.data.notation,
+                        purpose: message.data.purpose
                     };
-
                     setLocalMessages(prev => [...prev, gameMessage]);
                     break;
 
                 case 'error':
                     console.error('WebSocket error:', message.data.message);
+                    setLoadError(message.data.message || 'Произошла ошибка в игре');
                     break;
 
                 default:
-                    console.log('Unknown message type:', message.type);
+                    console.log('Unknown message type:', message.type, message.data);
             }
         } catch (error) {
             console.error('Error parsing WebSocket message:', error);
         }
-    }, []);
+    }, [user?.id, user?.username]);
 
     // Автопрокрутка к концу сообщений
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [actualMessages]);
 
+    // ✅ ИСПРАВЛЕНО: Используем actualChatMessages
     useEffect(() => {
         chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [chatMessages]);
+    }, [actualChatMessages]);
 
-    // ✅ ОБНОВЛЕННАЯ инициализация игры с поддержкой персонажей
+    // ✅ ИСПРАВЛЕНО: Инициализация игры
     useEffect(() => {
         if (!gameId || !user?.id) return;
 
@@ -481,30 +576,30 @@ const GamePage = () => {
                 setIsLoadingGame(true);
                 setLoadError(null);
 
-                // Загружаем информацию об игре
-                const gameData = await gameService.getGame(gameId);
-                if (isCleanedUp) return;
-
-                loadGame(gameId);
-
-                // ✅ Подключаемся к WebSocket с обработчиком персонажей
-                if (!isConnected && !isConnecting) {
+                if (!isConnected && !isConnecting && !hasTriedConnecting) {
                     setHasTriedConnecting(true);
 
                     // Настраиваем обработчики WebSocket
-                    websocketService.on('message', handleWebSocketMessage);
-                    websocketService.on('connect', () => {
+                    websocketService.on('connected', () => {
                         console.log('Connected to game WebSocket');
                         setConnectionAttempts(0);
                     });
-                    websocketService.on('disconnect', () => {
+
+                    websocketService.on('disconnected', () => {
                         console.log('Disconnected from game WebSocket');
                     });
+
                     websocketService.on('error', (error) => {
                         console.error('WebSocket error:', error);
                         setConnectionAttempts(prev => prev + 1);
                     });
 
+                    websocketService.on('message', (data) => {
+                        console.log('WebSocket message received:', data);
+                        handleWebSocketMessage(data);
+                    });
+
+                    // connectToGame сам загружает данные игры
                     await connectToGame(gameId);
                 }
 
@@ -522,82 +617,116 @@ const GamePage = () => {
 
         initializeGame();
 
-        // Cleanup function
         return () => {
             isCleanedUp = true;
             websocketService.off('message', handleWebSocketMessage);
         };
-    }, [gameId, user?.id, connectToGame, loadGame, isConnected, isConnecting, handleWebSocketMessage]);
+    }, [gameId, user?.id, connectToGame, isConnected, isConnecting, hasTriedConnecting, handleWebSocketMessage]);
 
-    // Отдельный эффект для инициализации данных после загрузки
+    // ✅ ИСПРАВЛЕНО: Генерация сцены
     useEffect(() => {
         if (!currentGame || generatedScene) return;
 
-        // Генерируем стартовую локацию если её нет
-        if (!currentScene) {
-            const scene = generateRandomStartLocation(currentGame);
-            setGeneratedScene(scene);
-        }
-    }, [currentGame, currentScene, generatedScene]);
+        const scene = generateRandomStartLocation(currentGame);
+        setGeneratedScene(scene);
+    }, [currentGame, generatedScene]);
 
-    // Отдельный эффект для инициализации сообщений
+    // Инициализация приветственного сообщения
     useEffect(() => {
         if (!currentGame || actualMessages.length > 0) return;
 
-        // Добавляем приветственное сообщение только один раз
         setLocalMessages([
             {
                 id: 'welcome',
                 type: 'dm',
                 author: 'Мастер игры',
-                content: `Добро пожаловать в игру "${currentGame.name}"!
-                
-Скоро начнется увлекательное путешествие! Ваша группа собралась в уютной таверне, обсуждая предстоящие дела.`,
+                content: `Добро пожаловать в игру "${currentGame.name}"!\n\nСкоро начнется увлекательное путешествие! Ваша группа собралась в уютной таверне, обсуждая предстоящие дела.`,
                 timestamp: new Date().toISOString()
             }
         ]);
     }, [currentGame, actualMessages.length]);
 
-    // ✅ ОБНОВЛЕННАЯ обработка отправки действия
+    useEffect(() => {
+        if (isConnected && websocketService.isConnected()) {
+            // Запрашиваем состояние игры несколько раз для надежности
+            const requestGameState = () => {
+                console.log('Requesting game state...');
+                websocketService.send({ type: 'get_game_state' });
+            };
+
+            // Первый запрос сразу
+            setTimeout(requestGameState, 500);
+
+            // Второй запрос через 2 секунды
+            setTimeout(requestGameState, 2000);
+
+            // Третий запрос через 5 секунд
+            setTimeout(requestGameState, 5000);
+        }
+    }, [isConnected]);
+
+    // Запрос состояния игры после подключения
+    useEffect(() => {
+        if (isConnected && websocketService.isConnected()) {
+            setTimeout(() => {
+                console.log('Requesting game state after connection...');
+                websocketService.send({ type: 'get_game_state' });
+            }, 1000);
+        }
+    }, [isConnected]);
+    // запрос дополнительной информации об игроках после подключения:
+    useEffect(() => {
+        if (isConnected && websocketService.isConnected()) {
+            setTimeout(() => {
+                console.log('Requesting game state after connection...');
+                websocketService.send({ type: 'get_game_state' });
+
+                // ✅ НОВОЕ: Также можно запросить список всех игроков
+                websocketService.send({ type: 'get_players_info' });
+            }, 1000);
+        }
+    }, [isConnected]);
+
+    // ✅ ОБРАБОТЧИКИ СОБЫТИЙ
     const handleActionSubmit = useCallback((e) => {
         e.preventDefault();
         if (!actionInput.trim() || !isConnected) return;
 
-        // ✅ Отправляем действие через WebSocket с поддержкой персонажей
         websocketService.send({
             type: 'player_action',
-            action: actionInput.trim()
+            data: {
+                action: actionInput.trim()
+            }
         });
 
         setActionInput('');
     }, [actionInput, isConnected]);
 
-    // ✅ ОБНОВЛЕННАЯ обработка отправки чата
     const handleChatSubmit = useCallback((e) => {
         e.preventDefault();
         if (!chatInput.trim() || !isConnected) return;
 
-        // ✅ Отправляем сообщение через WebSocket
         websocketService.send({
             type: 'chat_message',
-            content: chatInput.trim()
+            data: {
+                content: chatInput.trim()
+            }
         });
 
         setChatInput('');
     }, [chatInput, isConnected]);
 
-    // ✅ ОБНОВЛЕННАЯ обработка бросков кубиков
     const handleDiceRoll = useCallback((diceType) => {
         if (!isConnected) return;
 
-        // ✅ Отправляем бросок через WebSocket
         websocketService.send({
             type: 'dice_roll',
-            notation: diceType
+            data: {
+                notation: diceType
+            }
         });
     }, [isConnected]);
 
-    // Обработка переподключения
     const handleReconnect = useCallback(async () => {
         if (connectionAttempts >= maxConnectionAttempts) {
             setLoadError('Превышено максимальное количество попыток подключения. Перезагрузите страницу.');
@@ -612,14 +741,12 @@ const GamePage = () => {
         }
     }, [connectionAttempts, maxConnectionAttempts, connectToGame, gameId]);
 
-    // Cleanup при размонтировании
+    // ✅ ИСПРАВЛЕНО: Cleanup при размонтировании
     useEffect(() => {
         return () => {
-            // Отключаемся только при размонтировании компонента
             disconnectFromGame();
-            clearGame();
         };
-    }, []);
+    }, [disconnectFromGame]);
 
     // Показываем загрузку
     if (isLoadingGame && !currentGame) {
@@ -688,7 +815,7 @@ const GamePage = () => {
                         <div>
                             <h1 className="text-lg font-semibold">{currentGame.name}</h1>
                             <div className="flex items-center space-x-2 text-sm">
-                                {/* ✅ ОБНОВЛЕННЫЙ индикатор подключения */}
+                                {/* Индикатор подключения */}
                                 <div className="flex items-center space-x-1">
                                     {isConnected ? (
                                         <WifiSolid className="w-4 h-4 text-green-500" />
@@ -700,7 +827,7 @@ const GamePage = () => {
                                     </span>
                                 </div>
 
-                                {/* ✅ Информация о сцене */}
+                                {/* Информация о сцене */}
                                 {actualCurrentScene?.location && (
                                     <div className="flex items-center space-x-1">
                                         <MapIcon className="w-4 h-4 text-gray-400" />
@@ -708,7 +835,7 @@ const GamePage = () => {
                                     </div>
                                 )}
 
-                                {/* ✅ Количество игроков онлайн */}
+                                {/* Количество игроков онлайн */}
                                 <div className="flex items-center space-x-1">
                                     <UsersIcon className="w-4 h-4 text-gray-400" />
                                     <span className="text-gray-400">
@@ -861,7 +988,7 @@ const GamePage = () => {
                             <div className="flex items-center space-x-2">
                                 <CommandLineIcon className="w-5 h-5 text-purple-400" />
                                 <span className="font-medium text-white">Игровое действие</span>
-                                {/* ✅ Показываем имя персонажа если есть */}
+                                {/* Показываем имя персонажа если есть */}
                                 {currentUserCharacter && (
                                     <span className="text-sm text-gray-400">
                                         ({currentUserCharacter.name})
@@ -944,7 +1071,7 @@ const GamePage = () => {
                                     </Button>
                                 </div>
 
-                                {/* ✅ ИСПОЛЬЗУЕМ ОБНОВЛЕННЫЙ PlayerCard с поддержкой персонажей */}
+                                {/* Список игроков */}
                                 {!playersCollapsed && (
                                     <div className="space-y-2">
                                         {actualPlayers.length > 0 ? (
@@ -967,7 +1094,7 @@ const GamePage = () => {
                                     </div>
                                 )}
 
-                                {/* ✅ Показываем информацию о текущем ходе */}
+                                {/* Информация о текущем ходе */}
                                 {gameState?.turn_info?.current_player_id && (
                                     <div className="mt-4 p-2 bg-blue-900/20 rounded-lg border border-blue-700">
                                         <div className="flex items-center space-x-2">
@@ -983,7 +1110,7 @@ const GamePage = () => {
                                     </div>
                                 )}
 
-                                {/* ✅ Ваш персонаж */}
+                                {/* Ваш персонаж */}
                                 {currentUserCharacter && (
                                     <div className="mt-4 p-3 bg-green-900/20 rounded-lg border border-green-700">
                                         <h4 className="text-sm font-medium text-green-300 mb-2">Ваш персонаж</h4>
@@ -1014,7 +1141,7 @@ const GamePage = () => {
                             <div className="flex flex-col h-full">
                                 {/* Chat Messages */}
                                 <div className="flex-1 overflow-y-auto p-4 space-y-3">
-                                    {chatMessages.length === 0 ? (
+                                    {actualChatMessages.length === 0 ? (
                                         <div className="text-center py-8">
                                             <ChatBubbleLeftIcon className="mx-auto h-8 w-8 text-gray-400 mb-2" />
                                             <p className="text-sm text-gray-400">
@@ -1022,7 +1149,7 @@ const GamePage = () => {
                                             </p>
                                         </div>
                                     ) : (
-                                        chatMessages.map((message, index) => (
+                                        actualChatMessages.map((message, index) => (
                                             <ChatMessage
                                                 key={message.id || index}
                                                 message={message}
